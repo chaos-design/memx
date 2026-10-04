@@ -8,6 +8,7 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
+
 from mem import AgentMemory, MemoryConfig, build_memory_backend
 from mem.adapters import NoopLLMGateway
 from mem.adapters import production as prod

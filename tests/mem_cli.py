@@ -19,8 +19,9 @@ for _path in (SRC_DIR, TESTS_DIR):
     if _path_text not in sys.path:
         sys.path.insert(0, _path_text)
 
-from mem import AgentMemory, MemoryConfig  # noqa: E402
 from mock_conversations import ALL_MOCK_SCENARIO_GROUPS  # noqa: E402
+
+from mem import AgentMemory, MemoryConfig  # noqa: E402
 
 DEFAULT_MEMORY_DIR = ".memories/mem-cli"
 DEFAULT_SESSION_ID = "cli-session"

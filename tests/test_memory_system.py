@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 
 import pytest
+
 from mem import AgentMemory, MemoryConfig
 from mem.config.loader import load_memory_config
 from mem.embedding.scoring import (

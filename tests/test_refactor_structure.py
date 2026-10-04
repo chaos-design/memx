@@ -6,12 +6,13 @@ import importlib.util
 import inspect
 from pathlib import Path
 
+import pytest
+from fastapi.testclient import TestClient
+
 import mem.agents as agents
 import mem.api as api_module
 import mem.models as models
 import mem.server.routes as server_routes
-import pytest
-from fastapi.testclient import TestClient
 from mem import AgentMemory, HumanMem, MemoryConfig, load_memory_config
 from mem.agents import ConsolidationAgent, RecallAgent
 from mem.config import default_config_path, read_hms_config, write_hms_config

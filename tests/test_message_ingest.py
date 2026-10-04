@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 import pytest
+
 from mem import cli
 from mem.cli.message_ingest import format_messages, parse_messages
 from mem.cli.result import CliError

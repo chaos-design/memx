@@ -8,7 +8,6 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 import pytest
-from mem import AgentMemory, MemoryConfig
 from mock_conversations import (
     ALL_MOCK_SCENARIO_GROUPS,
     BOUNDARY_MEMORY_SCENARIOS,
@@ -27,6 +26,8 @@ from mock_conversations import (
     load_personal_preference_dialogue_text,
     parse_qa_dialogue,
 )
+
+from mem import AgentMemory, MemoryConfig
 
 MEMORY_KEY_PATTERN = re.compile(r"记住\s+([A-Za-z0-9_.-]+)=")
 CHINESE_TEXT_PATTERN = re.compile(r"[\u4e00-\u9fff]")
