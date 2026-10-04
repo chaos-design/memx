@@ -6,6 +6,7 @@ import math
 
 import pytest
 from mem import AgentMemory, MemoryConfig
+from mem.config.loader import load_memory_config
 from mem.embedding.scoring import (
     clip,
     consolidation_strength,
@@ -17,6 +18,7 @@ from mem.embedding.scoring import (
     user_emphasis_score,
 )
 from mem.embedding.vector import cosine_similarity, embed_text, token_count, tokenize
+from mem.exceptions import ConfigurationError
 from mem.graph.cognitive import CognitiveGraph
 from mem.ingest.buffer import ConversationBuffer
 from mem.ingest.inbox import InMemoryInbox
@@ -82,6 +84,27 @@ def test_config_boundaries_and_dynamic_threshold() -> None:
         MemoryConfig(inbox_max_retries=0)
     with pytest.raises(ValueError):
         MemoryConfig(orphan_evidence_confidence_penalty=1.1)
+
+
+def test_config_type_confusion_is_wrapped_as_configuration_error() -> None:
+    """Verify type-confused config values surface as ConfigurationError.
+
+    输入:
+        无；测试直接向 load_memory_config 传入类型错误的配置值。
+    输出:
+        None；断言类型错误被统一收敛，且原始信息保留在消息中。
+    示例输入:
+        pytest tests/test_memory_system.py -k type_confusion
+    示例输出:
+        测试通过。
+    """
+    with pytest.raises(ConfigurationError) as excinfo:
+        load_memory_config(overrides={"flush_turns": "abc"})
+    assert "flush_turns" in str(excinfo.value)
+
+    with pytest.raises(ConfigurationError) as excinfo:
+        load_memory_config(overrides={"max_recall_k": "not-a-number"})
+    assert "max_recall_k" in str(excinfo.value)
 
 
 def test_embedding_and_formula_boundaries() -> None:

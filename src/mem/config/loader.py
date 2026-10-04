@@ -72,8 +72,11 @@ def load_memory_config(
     coerced = _coerce_config_values(merged)
     try:
         return MemoryConfig(**coerced)
-    except ValueError as exc:
-        msg = "invalid MemX configuration."
+    except (TypeError, ValueError) as exc:
+        # 配置值类型混淆（例如 hms.json 里把 flush_turns 写成字符串）会在边界校验阶段
+        # 抛出 TypeError 而非 ValueError，这里统一收敛为 ConfigurationError，
+        # 并保留原始信息以便定位具体是哪个字段非法。
+        msg = f"invalid MemX configuration: {exc}"
         raise ConfigurationError(msg) from exc
 
 
