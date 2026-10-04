@@ -97,7 +97,11 @@ class CognitiveGraph:
     def graph_query(
         self, scope_id: str, query: str, k: int = 8
     ) -> Dict[str, List[dict]]:
-        """Query graph nodes by label.
+        """Query graph nodes by label, excluding superseded insights.
+
+        被 mark_evidence_stale 标记为 SUPERSEDED 的洞察依赖的是已被替换的
+        L3 证据，继续对外返回会让级联失效形同虚设，因此在排序与截断之前
+        先行过滤，保证 k 个名额由仍然有效的洞察填满。
 
         输入:
             scope_id: 作用域 ID。
@@ -113,7 +117,8 @@ class CognitiveGraph:
         nodes = [
             node
             for node in self._nodes.get(scope_id, {}).values()
-            if not terms or any(term in node.label.lower() for term in terms)
+            if node.status != InsightStatus.SUPERSEDED
+            and (not terms or any(term in node.label.lower() for term in terms))
         ]
         nodes = sorted(nodes, key=lambda node: node.salience, reverse=True)[:k]
         node_ids = {node.node_id for node in nodes}
@@ -127,7 +132,10 @@ class CognitiveGraph:
     def subgraph_for_context(
         self, scope_id: str, entities: Optional[List[str]], k: int = 8
     ) -> Dict[str, List[dict]]:
-        """Return a context subgraph for known entities.
+        """Return a context subgraph for known entities, excluding superseded ones.
+
+        与 graph_query 口径一致：SUPERSEDED 洞察既不能作为种子命中，
+        也不能经由邻居扩散重新进入结果。
 
         输入:
             scope_id: 作用域 ID。
@@ -145,7 +153,8 @@ class CognitiveGraph:
         nodes = [
             node
             for node in self._nodes.get(scope_id, {}).values()
-            if node.label.lower() in entity_terms
+            if node.status != InsightStatus.SUPERSEDED
+            and node.label.lower() in entity_terms
         ]
         node_ids = {node.node_id for node in nodes}
         edges = [
@@ -161,6 +170,7 @@ class CognitiveGraph:
             node
             for node in self._nodes.get(scope_id, {}).values()
             if node.node_id in connected_ids
+            and node.status != InsightStatus.SUPERSEDED
         ]
         connected = sorted(connected, key=lambda node: node.salience, reverse=True)[:k]
         return self._serialize(connected, edges)

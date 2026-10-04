@@ -36,6 +36,7 @@ from mem.memory.models import (
     GraphEdge,
     GraphNode,
     InboxStatus,
+    InsightStatus,
     MemoryIdentity,
     MemoryStatus,
     MemoryType,
@@ -377,6 +378,73 @@ def test_l4_graph_query_subgraph_and_prune() -> None:
     audit = graph.audit("t1")
     assert audit["orphan_edges"] == 1
     assert audit["removed_edges"] == 1
+
+
+def test_superseded_insights_are_excluded_from_l4_read_paths() -> None:
+    """Verify SUPERSEDED insights stop being served on every read path.
+
+    级联失效只有在读路径真正过滤时才有意义：mark_evidence_stale 把洞察标记为
+    SUPERSEDED 之后，graph_query、subgraph_for_context 的种子命中与邻居扩散
+    都不应再返回它；但 audit 仍需能统计到它，且 all_nodes 要为快照保留全量。
+
+    输入:
+        无；测试构造一个已被标记失效的洞察并遍历全部读路径。
+    输出:
+        None；断言读路径过滤、维护路径保留。
+    示例输入:
+        pytest tests/test_memory_system.py -k superseded_insights
+    示例输出:
+        测试通过。
+    """
+    graph = CognitiveGraph(MemoryConfig(graph_prune_threshold=0.01))
+    stale = graph.add_insight(
+        scope_id="t1",
+        label="用户住在上海",
+        evidence_ids=["m1"],
+        entities=["上海"],
+        salience=0.9,
+    )
+    fresh = graph.add_insight(
+        scope_id="t1",
+        label="用户偏好中文",
+        evidence_ids=["m2"],
+        entities=["上海"],
+        salience=0.9,
+    )
+    graph._upsert_edge("t1", fresh.node_id, stale.node_id, EdgeType.CAUSE, 0.5)
+
+    assert graph.mark_evidence_stale("t1", ["m1"]) == 1
+    assert stale.status == InsightStatus.SUPERSEDED
+
+    def labels(nodes):
+        return [node["label"] for node in nodes]
+
+    # 直接按标签命中：过期洞察不得返回。
+    assert "用户住在上海" not in labels(graph.graph_query("t1", "上海")["nodes"])
+    # 实体种子命中：不得返回。
+    assert "用户住在上海" not in labels(
+        graph.subgraph_for_context("t1", ["上海"])["nodes"]
+    )
+    # 空查询退化为全量遍历：同样不得返回。
+    assert "用户住在上海" not in labels(graph.subgraph_for_context("t1", None)["nodes"])
+    # 邻居扩散不得把过期洞察重新拉回结果。
+    subgraph_labels = labels(graph.subgraph_for_context("t1", ["上海"])["nodes"])
+    assert "用户住在上海" not in subgraph_labels
+    assert "用户偏好中文" in subgraph_labels
+    # 过期洞察的边也不应出现在结果里（_serialize 只保留两端都在 nodes 中的边）。
+    stale_id = stale.node_id
+    assert not {
+        endpoint
+        for edge in graph.graph_query("t1", "")["edges"]
+        for endpoint in (edge["source"], edge["target"])
+        if endpoint == stale_id
+    }
+    # k 名额必须由有效洞察填满，而不是被过期节点占掉。
+    assert len(graph.graph_query("t1", "", k=1)["nodes"]) == 1
+
+    # 维护与持久化路径不受影响：仍需看到并保留过期洞察。
+    assert graph.audit("t1")["superseded_insights"] == 1
+    assert stale.node_id in {node.node_id for node in graph.all_nodes("t1")}
 
 
 def test_service_end_to_end_observe_reflect_recall_and_context() -> None:
