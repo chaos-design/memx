@@ -1,0 +1,88 @@
+"""Central constants for the MemX package."""
+
+from __future__ import annotations
+
+from typing import Final
+
+HMS_CONFIG_FILENAME = "hms.json"
+PROJECT_MEMORY_SCOPE_ID: Final = "human_mem_project"
+
+PARTITION_SEMANTIC: Final = "semantic"
+PARTITION_PREFERENCE: Final = "preference"
+PARTITION_PROCEDURAL: Final = "procedural"
+MEMORY_PARTITIONS: Final = (
+    PARTITION_SEMANTIC,
+    PARTITION_PREFERENCE,
+    PARTITION_PROCEDURAL,
+)
+
+FORGET_MODE_DECAY: Final = "decay"
+FORGET_MODE_HARD: Final = "hard"
+FORGET_MODE_EXPIRE: Final = "expire"
+SUPPORTED_FORGET_MODES: Final = frozenset(
+    (FORGET_MODE_DECAY, FORGET_MODE_HARD, FORGET_MODE_EXPIRE)
+)
+FORGET_MODE_CHOICES: Final = tuple(sorted(SUPPORTED_FORGET_MODES))
+
+EXPLICIT_MEMORY_MARKERS: Final = (
+    "remember",
+    "memorize",
+    "save this",
+    "store this",
+    "\u8bb0\u4f4f",
+)
+EXPLICIT_MEMORY_DIRECTIVE_PATTERN: Final = (
+    r"(?:remember|memorize|save(?:\s+this)?|store(?:\s+this)?|\u8bb0\u4f4f)"
+)
+KEY_VALUE_MEMORY_PATTERN: Final = (
+    EXPLICIT_MEMORY_DIRECTIVE_PATTERN
+    + r"[:\uff1a]?\s*([A-Za-z0-9_.-]+)\s*=\s*([^,\uff0c\u3002;\uff1b]+)"
+)
+SAFE_NAME_PATTERN_TEXT: Final = r"[^A-Za-z0-9_.-]+"
+
+RETRIEVAL_SOURCE_NONE: Final = "none"
+RETRIEVAL_SOURCE_EMPTY_QUERY_HOT_FALLBACK: Final = "empty_query_hot_fallback"
+RETRIEVAL_SOURCE_NO_SPARSE_MATCH_HOT_FALLBACK: Final = (
+    "no_sparse_match_hot_fallback"
+)
+RETRIEVAL_SOURCE_SPARSE_ONLY_BOUNDED: Final = "sparse_only_bounded"
+RETRIEVAL_SOURCE_SPARSE_PLUS_HOT_FALLBACK: Final = "sparse_plus_hot_fallback"
+RETRIEVAL_CANDIDATE_SOURCES: Final = (
+    RETRIEVAL_SOURCE_NONE,
+    RETRIEVAL_SOURCE_EMPTY_QUERY_HOT_FALLBACK,
+    RETRIEVAL_SOURCE_NO_SPARSE_MATCH_HOT_FALLBACK,
+    RETRIEVAL_SOURCE_SPARSE_ONLY_BOUNDED,
+    RETRIEVAL_SOURCE_SPARSE_PLUS_HOT_FALLBACK,
+)
+
+RETRIEVAL_STAT_SCOPE_ID: Final = "scope_id"
+RETRIEVAL_STAT_QUERY_TOKENS: Final = "query_tokens"
+RETRIEVAL_STAT_CANDIDATE_COUNT: Final = "candidate_count"
+RETRIEVAL_STAT_FILTERED_COUNT: Final = "filtered_count"
+RETRIEVAL_STAT_DENSE_RANKED: Final = "dense_ranked"
+RETRIEVAL_STAT_SPARSE_RANKED: Final = "sparse_ranked"
+RETRIEVAL_STAT_CANDIDATE_SOURCE: Final = "candidate_source"
+RETRIEVAL_STAT_CANDIDATE_LIMIT: Final = "candidate_limit"
+RETRIEVAL_STAT_FIELDS: Final = (
+    RETRIEVAL_STAT_SCOPE_ID,
+    RETRIEVAL_STAT_QUERY_TOKENS,
+    RETRIEVAL_STAT_CANDIDATE_COUNT,
+    RETRIEVAL_STAT_FILTERED_COUNT,
+    RETRIEVAL_STAT_DENSE_RANKED,
+    RETRIEVAL_STAT_SPARSE_RANKED,
+    RETRIEVAL_STAT_CANDIDATE_SOURCE,
+    RETRIEVAL_STAT_CANDIDATE_LIMIT,
+)
+
+SCHEDULER_TASK_CONSOLIDATE: Final = "consolidate"
+SCHEDULER_TASK_FORGET: Final = "forget"
+SCHEDULER_TASK_REFLECT: Final = "reflect"
+SCHEDULER_TASK_FORGET_SWEEP: Final = "forget_sweep"
+SCHEDULER_TASKS: Final = (
+    SCHEDULER_TASK_CONSOLIDATE,
+    SCHEDULER_TASK_FORGET,
+)
+DEFAULT_SCHEDULER_TASKS: Final = (
+    SCHEDULER_TASK_CONSOLIDATE,
+    SCHEDULER_TASK_FORGET,
+)
