@@ -55,10 +55,16 @@ class MemoryIdentity:
     def scoped_session_key(self) -> str:
         """Return the storage key for scope-scoped session state.
 
+        约束:
+            分隔符为 ":" 且不做转义，因此 scope_id 不得包含 ":"。
+            否则 ("a:b", "c") 与 ("a", "b:c") 会得到同一个键 "a:b:c"，
+            导致两个会话共享 L0/L1 状态。scope_id 属部署期配置而非请求输入，
+            该冲突不会被外部请求触发，但一旦出现作用域命名带冒号即静默串号。
+
         输入:
             self: 记忆身份对象。
         输出:
-            str: 可用于 L0/L1 内部字典或 Redis key 的会话隔离键。
+            str: 可用于 L0/L1 内部字典的会话隔离键。
         示例:
             示例输入: MemoryIdentity("scope", "s1").scoped_session_key()
             示例输出: "scope:s1"
