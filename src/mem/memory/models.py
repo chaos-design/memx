@@ -1,0 +1,53 @@
+"""Backward-compatible exports for MemX model definitions."""
+
+from __future__ import annotations
+
+from ..models import (
+    ConflictAction,
+    ConflictRecord,
+    ConflictSeverity,
+    ConflictType,
+    ConsolidationInboxItem,
+    EdgeType,
+    EpisodicMemory,
+    GraphEdge,
+    GraphNode,
+    InboxStatus,
+    InsightStatus,
+    MemoryIdentity,
+    MemoryStatus,
+    MemoryType,
+    Message,
+    NodeType,
+    RecallPlan,
+    RecallResult,
+    Role,
+    SemanticFact,
+    WorkingMemory,
+    ensure_sequence,
+)
+
+__all__ = [
+    "ConflictAction",
+    "ConflictRecord",
+    "ConflictSeverity",
+    "ConflictType",
+    "ConsolidationInboxItem",
+    "EdgeType",
+    "EpisodicMemory",
+    "GraphEdge",
+    "GraphNode",
+    "InboxStatus",
+    "InsightStatus",
+    "MemoryIdentity",
+    "MemoryStatus",
+    "MemoryType",
+    "Message",
+    "NodeType",
+    "RecallPlan",
+    "RecallResult",
+    "Role",
+    "SemanticFact",
+    "WorkingMemory",
+    "ensure_sequence",
+]
