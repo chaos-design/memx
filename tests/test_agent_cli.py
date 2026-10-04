@@ -10,7 +10,9 @@ from typing import Any, Dict, List, Sequence
 import pytest
 
 # agent_cli 与 agent_provider 同属仓库外的兄弟项目，只有在该模块可用时本组用例才可运行。
-pytest.importorskip("agent_provider", reason="optional sibling module 'agent_provider' is not installed")
+pytest.importorskip(
+    "agent_provider", reason="optional sibling module is not installed"
+)
 
 import agent_cli  # noqa: E402
 
