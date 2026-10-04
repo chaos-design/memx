@@ -8,6 +8,7 @@ import pytest
 
 from mem import AgentMemory, MemoryConfig
 from mem.config.loader import load_memory_config
+from mem.constants import RETRIEVAL_SOURCE_SPARSE_ONLY_BOUNDED
 from mem.embedding.scoring import (
     clip,
     consolidation_strength,
@@ -49,6 +50,7 @@ from mem.memory.models import (
     ensure_sequence,
 )
 from mem.memory.semantic import SemanticStore
+from mem.retrieval import build_candidate_pool, fts5_global_semantic_search
 from mem.schemas.ddl import reference_ddl
 
 
@@ -138,7 +140,24 @@ def test_embedding_and_formula_boundaries() -> None:
     assert consolidation_strength(8, 3, 0.5) > 0
     with pytest.raises(ValueError):
         consolidation_strength(1, 1, 0.0, max_access=0)
-    assert salience_update(0.5, 2, 0.5, 0.8) == pytest.approx(0.9)
+    # 设计文档 §5.4 要求归一化后再进 EMA：min(2,10)/10 + 0.5 = 0.7，
+    # 0.8*0.5 + 0.2*0.7 = 0.54。
+    assert salience_update(0.5, 2, 0.5, 0.8) == pytest.approx(0.54)
+    # 关键不变式：没有任何支撑时显著度必须真的衰减，否则 prune 只会单调递增。
+    assert salience_update(0.95, 0, 0.0, 0.8) < 0.95
+    # 归一化上界保证引用数再大也不会把显著度一步钉死在 1.0，
+    # 且支撑饱和后结果与引用数无关（旧公式下 r=5 即从 0.05 跳到 1.0）。
+    assert salience_update(0.05, 5, 0.0, 0.8) < 1.0
+    assert salience_update(0.05, 99, 0.0, 0.8) == salience_update(0.05, 10**6, 0.0, 0.8)
+    # 反复迭代必须收敛到归一化支撑值这个不动点，而不是单调爬向 1.0 后卡死：
+    # EMA 的不动点等于支撑项本身，这里 min(1,10)/10 = 0.1，远低于剪枝可达区间。
+    settled = 0.05
+    for _ in range(200):
+        settled = salience_update(settled, 1, 0.0, 0.8)
+    assert settled == pytest.approx(0.1)
+    # max_ref_count 必须为正，否则归一化无定义。
+    with pytest.raises(ValueError):
+        salience_update(0.5, 2, 0.5, 0.8, max_ref_count=0)
 
 
 def test_l0_buffer_ring_ttl_and_snapshot() -> None:
@@ -445,6 +464,197 @@ def test_superseded_insights_are_excluded_from_l4_read_paths() -> None:
     # 维护与持久化路径不受影响：仍需看到并保留过期洞察。
     assert graph.audit("t1")["superseded_insights"] == 1
     assert stale.node_id in {node.node_id for node in graph.all_nodes("t1")}
+
+
+def test_superseded_insights_are_excluded_from_retrieval_graph_route() -> None:
+    """Verify the retrieval graph route honors SUPERSEDED, not just graph_query.
+
+    graph_query / subgraph_for_context 过滤失效洞察后，检索融合层仍从
+    all_nodes 读全量视图，会把仅由失效洞察支撑的记忆当作 graph 路证据返回，
+    且在 RRF 融合中排到前面——级联失效被完全抵消。
+
+    输入:
+        无；构造「过期洞察 + 有效洞察」，标记过期后跑一次检索。
+    输出:
+        None；断言 graph 路不再为失效证据投票。
+    示例输入:
+        pytest tests/test_memory_system.py -k superseded_insights_are_excluded_from
+    示例输出:
+        测试通过。
+    """
+    graph = CognitiveGraph(MemoryConfig(graph_prune_threshold=0.01))
+    stale = graph.add_insight(
+        scope_id="s1",
+        label="上海",
+        evidence_ids=["m_stale"],
+        salience=0.9,
+    )
+    fresh = graph.add_insight(
+        scope_id="s1",
+        label="上海天气",
+        evidence_ids=["m_fresh"],
+        salience=0.5,
+    )
+    graph._upsert_edge("s1", fresh.node_id, stale.node_id, EdgeType.CAUSE, 0.5)
+    graph.mark_evidence_stale("s1", ["m_stale"])
+
+    def record(mem_id: str, text: str) -> EpisodicMemory:
+        return EpisodicMemory(
+            mem_id=mem_id,
+            text=text,
+            scope_id="s1",
+            importance=5,
+            access_count=0,
+            embedding=embed_text(text),
+            ts_create=0.0,
+            ts_last_access=0.0,
+        )
+
+    records = {
+        memory.mem_id: memory
+        for memory in (record("m_stale", "上海"), record("m_fresh", "上海天气"))
+    }
+    result = fts5_global_semantic_search(
+        list(records.values()),
+        "上海",
+        MemoryConfig(),
+        k=2,
+        graph=graph,
+    )
+    graph_served = {
+        result["mem_id"]
+        for result in result["results"]
+        if "graph" in result.get("route_hits", [])
+    }
+    assert "m_stale" not in graph_served
+    assert "m_fresh" in graph_served
+    # 维护路径仍能看到全量，过滤只发生在消费侧。
+    assert stale.status == InsightStatus.SUPERSEDED
+    assert stale.node_id in {node.node_id for node in graph.all_nodes("s1")}
+
+
+def test_prune_keeps_label_index_consistent_with_nodes() -> None:
+    """Verify pruning a node also drops its label index entry.
+
+    _upsert_node 命中标签索引后会直接按 id 取节点。剪枝若只删节点表，
+    残留的悬空 id 会让同标签的再次写入抛 KeyError；而 KeyError 会被
+    反思流程的 except Exception 吞掉，洞察从此静默丢失。
+
+    输入:
+        无；剪掉一个孤立低显著节点后用同标签重新写入。
+    输出:
+        None；断言重新写入成功且索引与节点表一致。
+    示例输入:
+        pytest tests/test_memory_system.py -k prune_keeps_label_index
+    示例输出:
+        测试通过。
+    """
+    graph = CognitiveGraph(
+        MemoryConfig(graph_salience_decay=0.99, graph_prune_threshold=0.95)
+    )
+    graph.add_insight(scope_id="t1", label="孤立洞察", salience=0.01)
+    assert graph.prune("t1") == 1
+    assert graph.all_nodes("t1") == []
+    # 不变式：标签索引的每个 id 都必须存在于节点表。
+    assert all(
+        node_id in graph._nodes["t1"]
+        for node_id in graph._label_index.get("t1", {}).values()
+    )
+    revived = graph.add_insight(scope_id="t1", label="孤立洞察", salience=0.5)
+    assert revived.salience == 0.5
+    assert [node.node_id for node in graph.all_nodes("t1")] == [revived.node_id]
+
+
+def test_sparse_candidate_pool_ranks_by_query_overlap_before_heat() -> None:
+    """Verify sparse-bounded truncation keeps the most query-relevant record.
+
+    稀疏命中数超过候选上限时，截断键若用业务热度，一条完整匹配查询的冷记忆
+    会被只命中单个 token 的热记忆挤掉，且它之后再无打分机会。
+
+    输入:
+        无；1 条全命中冷记忆 + 70 条单命中热记忆。
+    输出:
+        None；断言全命中记录仍在候选池内且排在首位。
+    示例输入:
+        pytest tests/test_memory_system.py -k sparse_candidate_pool_ranks
+    示例输出:
+        测试通过。
+    """
+    config = MemoryConfig()
+    query = "python testing framework deployment spec"
+
+    def record(mem_id: str, text: str, importance: int, access_count: int):
+        return EpisodicMemory(
+            mem_id=mem_id,
+            text=text,
+            scope_id="s1",
+            importance=importance,
+            access_count=access_count,
+            embedding=embed_text(text),
+            ts_create=0.0,
+            ts_last_access=0.0,
+        )
+
+    target = record("m_target", query, 5, 0)
+    records = {target.mem_id: target}
+    inverted_index: dict = {}
+    for index in range(70):
+        hot = record("m_hot%03d" % index, "python", 9, 100)
+        records[hot.mem_id] = hot
+    for memory in records.values():
+        for token in tokenize(memory.text):
+            inverted_index.setdefault(token, set()).add(memory.mem_id)
+
+    pool = build_candidate_pool(
+        records,
+        frozenset(tokenize(query)),
+        inverted_index,
+        config,
+        True,
+        8,
+    )
+    assert pool.source == RETRIEVAL_SOURCE_SPARSE_ONLY_BOUNDED
+    assert len(pool.candidates) == 64
+    assert pool.candidates[0].mem_id == "m_target"
+    assert any(candidate.mem_id == "m_target" for candidate in pool.candidates)
+
+
+def test_config_narrows_widened_numeric_values_to_declared_types() -> None:
+    """Verify accepted-but-widened config values are narrowed, not passed through.
+
+    校验有意接受可无损窄化的输入（int 字段接受 8.0），但通过校验不等于
+    可以直接构造：float 落到 embedding_dimensions 上会在建向量时抛
+    TypeError，而非 ConfigurationError。
+
+    输入:
+        无；用整值浮点与整数分别覆盖 int 字段与 float 字段。
+    输出:
+        None；断言值被收窄为声明类型。
+    示例输入:
+        pytest tests/test_memory_system.py -k config_narrows_widened
+    示例输出:
+        测试通过。
+    """
+    config = load_memory_config(
+        overrides={
+            "embedding_dimensions": 64.0,
+            "episodic_capacity": 100000.0,
+            "raw_ttl_seconds": 3600,
+            "temporal_fact_keys": ["device.os"],
+        }
+    )
+    for value in (
+        config.embedding_dimensions,
+        config.episodic_capacity,
+        config.max_recall_k,
+    ):
+        assert isinstance(value, int)
+        assert not isinstance(value, bool)
+    assert isinstance(config.raw_ttl_seconds, float)
+    assert isinstance(config.temporal_fact_keys, tuple)
+    # bool 是 int 的子类，必须仍然被拒绝而不是被收窄。
+    with pytest.raises(ConfigurationError):
+        load_memory_config(overrides={"flush_turns": True})
 
 
 def test_service_end_to_end_observe_reflect_recall_and_context() -> None:

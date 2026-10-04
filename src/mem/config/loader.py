@@ -9,7 +9,7 @@ from typing import Any, Dict, Mapping, Optional, Union
 from ..constants import HMS_CONFIG_FILENAME
 from ..exceptions import ConfigurationError
 from ..utils.json import merge_json_objects, read_json_object, write_json_object
-from ..utils.validation import validate_config_updates
+from ..utils.validation import narrow_config_values, validate_config_updates
 from .settings import MemoryConfig
 
 ConfigPath = Union[str, Path]
@@ -109,20 +109,19 @@ def write_hms_config(
 def _coerce_config_values(config: Mapping[str, Any]) -> Dict[str, Any]:
     """Coerce JSON values into MemoryConfig-compatible values.
 
+    收窄逻辑按字段注解驱动，不逐字段特判：逐字段特判意味着每新增一个 int
+    字段就要在这里补一条，漏掉时校验仍会放行宽类型值，故障点被推迟到
+    使用现场（TypeError 而非 ConfigurationError）。
+
     输入:
         config: JSON 字典。
     输出:
         dict: 可传入 MemoryConfig 的字典。
     示例:
-        示例输入: _coerce_config_values({"temporal_fact_keys": ["a"]})
-        示例输出: {"temporal_fact_keys": ("a",)}
+        示例输入: _coerce_config_values({"max_recall_k": 8.0})
+        示例输出: {"max_recall_k": 8}
     """
-    coerced = dict(config)
-    if "temporal_fact_keys" in coerced and isinstance(
-        coerced["temporal_fact_keys"], list
-    ):
-        coerced["temporal_fact_keys"] = tuple(coerced["temporal_fact_keys"])
-    return coerced
+    return narrow_config_values(dict(config), MemoryConfig)
 
 
 def _to_json_config(

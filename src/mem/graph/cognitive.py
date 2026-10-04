@@ -209,6 +209,13 @@ class CognitiveGraph:
                 and degree[node_id] == 0
             ):
                 del nodes[node_id]
+                # 标签索引必须与节点表同步收缩：_upsert_node 命中索引后会直接下标取
+                # 节点，残留的悬空 id 会让同标签的再次写入抛 KeyError。
+                for key, indexed_id in list(
+                    self._label_index.get(scope_id, {}).items()
+                ):
+                    if indexed_id == node_id:
+                        del self._label_index[scope_id][key]
                 removed += 1
         return removed
 
@@ -340,7 +347,9 @@ class CognitiveGraph:
         """
         key = f"{node_type.value}:{label.lower()}"
         existing_id = self._label_index[scope_id].get(key)
-        if existing_id is not None:
+        # 悬空的标签索引视为未命中：节点表才是唯一事实源，
+        # 否则后续按 id 取节点会抛 KeyError。
+        if existing_id is not None and existing_id in self._nodes[scope_id]:
             node = self._nodes[scope_id][existing_id]
             node.salience = max(node.salience, salience)
             if (

@@ -18,6 +18,10 @@ IMPORTANT_RULE_PATTERN = re.compile(
 # F1 规则信号中的数字检测，用于捕获日期、数量、版本等可操作信息。
 DIGIT_PATTERN = re.compile(r"\d")
 
+# L4 显著度归一化上界：与 consolidation_strength 的 max_access 同量纲，
+# 让「引用数 + 边权之和」贡献落在 [0,1]，衰减项才能保持主导。
+SALIENCE_MAX_REF_COUNT = 10
+
 
 def clip(value: float, lower: int, upper: int) -> int:
     """Clip and round a numeric score.
@@ -222,6 +226,7 @@ def salience_update(
     ref_count: int,
     edge_weight_sum: float,
     decay: float,
+    max_ref_count: int = SALIENCE_MAX_REF_COUNT,
 ) -> float:
     """Compute L4 node salience update.
 
@@ -230,11 +235,20 @@ def salience_update(
         ref_count: 引用次数。
         edge_weight_sum: 关联边权重和。
         decay: 衰减系数 μ。
+        max_ref_count: 引用次数归一化上界。
     输出:
         float: 限制在 0-1 的新显著度。
     示例:
         示例输入: salience_update(0.5, 2, 0.3, 0.8)
-        示例输出: 0.86
+        示例输出: 0.58
     """
-    raw = decay * current_salience + (1 - decay) * (ref_count + edge_weight_sum)
+    if max_ref_count <= 0:
+        msg = "max_ref_count must be positive."
+        raise ValueError(msg)
+    # 设计文档 §5.4 要求对 (ref_count + Σweight) 做归一化后再进入 EMA。
+    # 归一化不可省：ref_count 无上界，直接相加会让加性项支配衰减项，
+    # 使 s' 恒 ≥ s，prune 的衰减语义退化为单调递增。
+    support = min(ref_count, max_ref_count) / max_ref_count
+    reinforcement = min(1.0, support + max(0.0, edge_weight_sum))
+    raw = decay * current_salience + (1 - decay) * reinforcement
     return max(0.0, min(1.0, raw))

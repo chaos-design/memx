@@ -9,6 +9,7 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, Protocol, Seque
 from ..config.settings import MemoryConfig
 from ..embedding.vector import cosine_similarity, embed_text, tokenize
 from ..memory.models import EpisodicMemory, MemoryStatus
+from ..models.enums import InsightStatus
 from .ranking import keyword_overlap_tokens
 
 HYBRID_RRF_ENGINE = "hybrid_rrf"
@@ -517,7 +518,14 @@ class LocalGraphRetriever:
             示例输出: [GraphNode(...)]
         """
         if self.graph is not None:
-            return list(self.graph.all_nodes(scope_id))
+            # 与 graph_query / subgraph_for_context 同口径：SUPERSEDED 洞察依赖
+            # 已被替换的 L3 证据，若在此放行，级联失效会在 RRF 融合阶段被抵消。
+            # 过滤发生在消费侧而非 all_nodes 内部，audit 与快照仍需看到全量。
+            return [
+                node
+                for node in self.graph.all_nodes(scope_id)
+                if getattr(node, "status", None) is not InsightStatus.SUPERSEDED
+            ]
         return [node for node in self.nodes if _node_scope_id(node) == scope_id]
 
     def _edges_for_scope(self, scope_id: str) -> List[Any]:
@@ -956,18 +964,22 @@ def _route_limit(record_count: int, k: int, config: MemoryConfig) -> int:
     )
 
 
-def _record_scopes(records: Sequence[EpisodicMemory]) -> Set[str]:
-    """Return scope IDs represented by records.
+def _record_scopes(records: Sequence[EpisodicMemory]) -> List[str]:
+    """Return scope IDs represented by records, in deterministic order.
+
+    必须排序返回：调用方按此顺序把分数累加进同一个 dict，而后续排序是稳定
+    排序，并列项的名次由插入顺序决定。set 的迭代序随进程哈希种子变化，会让
+    同输入在不同进程产出不同排名。
 
     输入:
         records: L2 记录集合。
     输出:
-        set[str]: scope_id 集合。
+        list[str]: 升序去重的 scope_id 列表。
     示例:
         示例输入: _record_scopes([memory])
-        示例输出: {"scope"}
+        示例输出: ["scope"]
     """
-    return {memory.scope_id for memory in records}
+    return sorted({memory.scope_id for memory in records})
 
 
 def _routes_payload(route_results: Sequence[RouteResult]) -> Dict[str, Dict[str, Any]]:

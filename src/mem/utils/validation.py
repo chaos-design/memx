@@ -119,6 +119,60 @@ def _annotation_name(annotation: Any) -> str:
     return str(annotation).replace("typing.", "")
 
 
+def narrow_config_values(
+    values: Dict[str, Any], dataclass_type: Type[object]
+) -> Dict[str, Any]:
+    """Narrow accepted-but-widened config values to their declared types.
+
+    `_annotation_accepts` 有意接受可无损窄化的情形（int 字段接受 8.0、
+    序列字段接受 list），但「接受」不等于「可以直接构造」：JSON 里的
+    `64.0` 通过校验后仍是 float，落到 `embedding_dimensions` 上会在建向量
+    时抛 TypeError 而不是 ConfigurationError。收窄必须在这里统一完成。
+
+    输入:
+        values: 已通过 validate_config_updates 的配置字典。
+        dataclass_type: 配置 dataclass 类型。
+    输出:
+        dict: 数值与序列字段已收窄的副本。
+    示例:
+        示例输入: narrow_config_values({"max_recall_k": 8.0}, MemoryConfig)
+        示例输出: {"max_recall_k": 8}
+    """
+    narrowed = dict(values)
+    hints = get_type_hints(dataclass_type)
+    for key, value in list(narrowed.items()):
+        annotation = hints.get(key)
+        if annotation is None:
+            continue
+        converted = _narrow_value(value, annotation)
+        if converted is not None:
+            narrowed[key] = converted
+    return narrowed
+
+
+def _narrow_value(value: Any, annotation: Any) -> Any:
+    """Narrow one value to its annotation, or return None when unchanged.
+
+    输入:
+        value: 原始值。
+        annotation: 目标类型注解。
+    输出:
+        Any: 收窄后的值；无需收窄时为 None。
+    示例:
+        示例输入: _narrow_value(8.0, int)
+        示例输出: 8
+    """
+    if isinstance(value, bool):
+        return None
+    if annotation is int and isinstance(value, float) and value.is_integer():
+        return int(value)
+    if annotation is float and isinstance(value, int):
+        return float(value)
+    if get_origin(annotation) is tuple and isinstance(value, list):
+        return tuple(value)
+    return None
+
+
 def validate_config_updates(
     updates: Dict[str, Any], dataclass_type: Type[object]
 ) -> None:

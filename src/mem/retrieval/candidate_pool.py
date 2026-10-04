@@ -112,7 +112,14 @@ def build_candidate_pool(
             ),
             RETRIEVAL_SOURCE_NO_SPARSE_MATCH_HOT_FALLBACK,
         )
-    return _sparse_candidate_pool(all_candidates, matched_ids, config, k)
+    return _sparse_candidate_pool(
+        all_candidates,
+        matched_ids,
+        frozenset(query_tokens),
+        inverted_index,
+        config,
+        k,
+    )
 
 
 def _matched_ids(
@@ -136,23 +143,51 @@ def _matched_ids(
     return matched_ids
 
 
+def _matched_token_count(
+    mem_id: str,
+    query_tokens: frozenset,
+    inverted_index: Mapping[str, Set[str]],
+) -> int:
+    """Count how many distinct query tokens a record matches.
+
+    输入:
+        mem_id: 记忆 ID。
+        query_tokens: 查询 token 集合。
+        inverted_index: token 到 mem_id 集合的映射。
+    输出:
+        int: 命中的查询 token 数。
+    示例:
+        示例输入: _matched_token_count("m1", frozenset({"a", "b"}), {"a": {"m1"}})
+        示例输出: 1
+    """
+    return sum(1 for token in query_tokens if mem_id in inverted_index.get(token, ()))
+
+
 def _sparse_candidate_pool(
     all_candidates: List[EpisodicMemory],
     matched_ids: Set[str],
+    query_tokens: frozenset,
+    inverted_index: Mapping[str, Set[str]],
     config: MemoryConfig,
     k: int,
 ) -> CandidatePoolResult:
     """Build a sparse-first candidate pool with hot fallback.
 
+    稀疏命中已足够多时，截断必须以查询相关性为主键：这些候选都已命中查询，
+    差别只在命中了多少 token。若按热度截断，一条完整匹配查询的冷记忆会被
+    只命中单个 token 的热记忆挤掉，而它之后再无打分机会。
+
     输入:
         all_candidates: 所有可检索候选。
         matched_ids: sparse 命中的 mem_id。
+        query_tokens: 查询 token 集合。
+        inverted_index: token 到 mem_id 集合的映射。
         config: 系统配置。
         k: 请求返回数量。
     输出:
         CandidatePoolResult: 候选池及来源。
     示例:
-        示例输入: _sparse_candidate_pool([memory], {"m1"}, config, 8)
+        示例输入: _sparse_candidate_pool([memory], {"m1"}, tokens, index, cfg, 8)
         示例输出: CandidatePoolResult(candidates=[memory], source="...")
     """
     by_id = {memory.mem_id: memory for memory in all_candidates}
@@ -166,7 +201,16 @@ def _sparse_candidate_pool(
     )
     if len(matched) >= candidate_limit:
         return CandidatePoolResult(
-            nlargest(candidate_limit, matched, key=hot_candidate_score),
+            nlargest(
+                candidate_limit,
+                matched,
+                key=lambda memory: (
+                    _matched_token_count(
+                        memory.mem_id, query_tokens, inverted_index
+                    ),
+                    hot_candidate_score(memory),
+                ),
+            ),
             RETRIEVAL_SOURCE_SPARSE_ONLY_BOUNDED,
         )
     matched_set = {memory.mem_id for memory in matched}
