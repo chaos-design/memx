@@ -44,7 +44,14 @@ def read_hms_config(path: Optional[ConfigPath] = None) -> Dict[str, Any]:
     try:
         config = read_json_object(config_path)
     except ValueError as exc:
+        # JSON 语法错或顶层不是对象。
         msg = f"invalid hms config file: {config_path}"
+        raise ConfigurationError(msg) from exc
+    except OSError as exc:
+        # 路径是目录、无读权限等：OSError 不是 ValueError 的子类，
+        # 不收敛就会以裸 IsADirectoryError/PermissionError 逃逸出配置层，
+        # CLI 与 HTTP 端点拿到的 error_type 与其他配置错误不一致，无法定位。
+        msg = f"unreadable hms config file: {config_path}: {exc}"
         raise ConfigurationError(msg) from exc
     validate_config_updates(config, MemoryConfig)
     return config

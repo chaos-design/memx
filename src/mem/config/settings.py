@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, replace
 from typing import Dict, Optional, Tuple
 
@@ -215,6 +216,36 @@ class MemoryConfig:
             raise ValueError(msg)
         if not 0 <= self.orphan_evidence_confidence_penalty <= 1:
             msg = "orphan_evidence_confidence_penalty must be in [0, 1]."
+            raise ValueError(msg)
+        # 缺下界会让 L0 窗口的溢出量恒大于桶长，每条消息 append 后立刻被整桶
+        # 移出窗口：read_window 恒返回空，全部流量被强推给 L1 压缩。
+        if self.raw_window_turns <= 0:
+            msg = "raw_window_turns must be positive."
+            raise ValueError(msg)
+        # decay 必须是真衰减：取 0 会让当前值被完全忽略（s' 只剩支撑项），
+        # 取 1 则支撑项失效、显著度永不变化。
+        if not 0 < self.graph_salience_decay <= 1:
+            msg = "graph_salience_decay must be in (0, 1]."
+            raise ValueError(msg)
+        # rrf_k0 <= 0 会在 1/(rrf_k0 + rank) 上抛 ZeroDivisionError。
+        if self.rrf_k0 <= 0:
+            msg = "rrf_k0 must be positive."
+            raise ValueError(msg)
+        if not 0 <= self.graph_prune_threshold <= 1:
+            msg = "graph_prune_threshold must be in [0, 1]."
+            raise ValueError(msg)
+        # F2 是加权平均：权重和必须为 1，否则 relevance_score 脱离 [0,1]
+        # 标度，minimum_relevance_score 的阈值判定随之失效。
+        f2_weights = (
+            self.f2_weight_relevance,
+            self.f2_weight_recency,
+            self.f2_weight_importance,
+        )
+        if any(weight < 0 for weight in f2_weights):
+            msg = "f2 weights must be non-negative."
+            raise ValueError(msg)
+        if not math.isclose(sum(f2_weights), 1.0, rel_tol=1e-6, abs_tol=1e-6):
+            msg = "f2 weights must sum to 1."
             raise ValueError(msg)
         validate_memory_dir(self.memory_dir)
 

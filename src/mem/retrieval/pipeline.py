@@ -10,6 +10,7 @@ from ..config.settings import MemoryConfig
 from ..embedding.vector import cosine_similarity, embed_text, tokenize
 from ..memory.models import EpisodicMemory, MemoryStatus
 from ..models.enums import InsightStatus
+from ..utils.validation import clamp_recall_k
 from .ranking import keyword_overlap_tokens
 
 HYBRID_RRF_ENGINE = "hybrid_rrf"
@@ -322,6 +323,10 @@ class LocalGraphRetriever:
             for edge in edges:
                 source_id = _edge_source_id(edge)
                 target_id = _edge_target_id(edge)
+                # 必须传入种子节点分：related 的每个邻居都有种子，
+                # 漏传会吃到 base_score=1.0 的兜底值，导致同一条边、同一个
+                # 节点仅因落在 results 还是 related 就差数倍，而两者最终
+                # 被平铺进同一个 JSON payload，下游无法跨通道比较。
                 if source_id in seed_ids:
                     self._score_neighbor(
                         target_id,
@@ -330,6 +335,7 @@ class LocalGraphRetriever:
                         related_scores,
                         eligible_ids,
                         main_mem_ids,
+                        _node_salience(node_by_id[source_id]),
                     )
                 if target_id in seed_ids:
                     self._score_neighbor(
@@ -339,6 +345,7 @@ class LocalGraphRetriever:
                         related_scores,
                         eligible_ids,
                         main_mem_ids,
+                        _node_salience(node_by_id[target_id]),
                     )
         ranked = sorted(
             related_scores.items(),
@@ -632,6 +639,8 @@ class HybridSearchPipeline:
             示例输入: pipeline.search([memory], "agent", k=3)
             示例输出: {"engine": "hybrid_rrf", "results": [...], "related": [...]}
         """
+        requested_k = k
+        k = clamp_recall_k(k, self.config.max_recall_k)
         now = time.time() if now_ts is None else now_ts
         query_tokens = frozenset(tokenize(query))
         query_embedding = embed_text(query, self.config.embedding_dimensions)
@@ -645,7 +654,7 @@ class HybridSearchPipeline:
             now_ts=now,
             config=self.config,
         )
-        if k <= 0 or not query_tokens:
+        if requested_k <= 0 or not query_tokens:
             return self._empty_payload(query, query_tokens, len(eligible))
         route_results, route_errors = self._run_routes(eligible, request)
         fused_candidates = self._fuse(route_results, eligible, request)
@@ -667,6 +676,11 @@ class HybridSearchPipeline:
             "fused_candidate_count": len(fused_candidates),
             "result_count": len(fused),
             "related_count": len(related),
+            # 收敛必须可观测：调用方请求 4000 拿到 50 时需要能看出被裁剪，
+            # 否则「结果变少」与「相关性变差」在下游无法区分。
+            "requested_k": requested_k,
+            "effective_k": k,
+            "max_recall_k": self.config.max_recall_k,
             "routes": _routes_payload(route_results),
             "route_errors": route_errors,
             "rerank_enabled": enable_cross_encoder,
@@ -853,6 +867,9 @@ class HybridSearchPipeline:
             "query_tokens": sorted(query_tokens),
             "candidate_count": candidate_count,
             "fused_candidate_count": 0,
+            "requested_k": 0,
+            "effective_k": 0,
+            "max_recall_k": self.config.max_recall_k,
             "fts_match_count": 0,
             "result_count": 0,
             "related_count": 0,

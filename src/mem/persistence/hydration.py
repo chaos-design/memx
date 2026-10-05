@@ -217,6 +217,11 @@ def _restore_l4(graph: Any, scope_id: str, state: Mapping[str, Any]) -> int:
     raw_l4 = state.get("l4", {})
     if not isinstance(raw_l4, Mapping):
         return 0
+    # 失效证据集合先于节点恢复：节点 status 由它推导。
+    stale_evidence = {
+        str(evidence_id) for evidence_id in raw_l4.get("stale_evidence", [])
+    }
+    graph._stale_evidence[scope_id] = stale_evidence
     for item in raw_l4.get("nodes", []):
         if not isinstance(item, Mapping):
             continue
@@ -224,6 +229,9 @@ def _restore_l4(graph: Any, scope_id: str, state: Mapping[str, Any]) -> int:
         graph._nodes[node.scope_id][node.node_id] = node
         key = f"{node.node_type.value}:{node.label.lower()}"
         graph._label_index[node.scope_id][key] = node.node_id
+        # 快照里的节点可能带自己的 scope_id，失效集合需在其作用域同样可见。
+        if node.scope_id != scope_id:
+            graph._stale_evidence[node.scope_id].update(stale_evidence)
     for item in raw_l4.get("edges", []):
         if isinstance(item, Mapping):
             edge = _graph_edge_from_dict(item, scope_id)

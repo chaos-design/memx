@@ -8,6 +8,7 @@ from typing import Callable, Dict, List, Mapping, Set, Tuple
 from ..config.settings import MemoryConfig
 from ..embedding.vector import cosine_similarity, tokenize
 from ..memory.models import EpisodicMemory
+from ..utils.validation import clamp_recall_k
 from .candidate_pool import build_candidate_pool
 from .diagnostics import retrieval_stats
 from .ranking import (
@@ -64,6 +65,7 @@ def hybrid_retrieve(
     """
     if k <= 0:
         return RetrievalOutcome([], {}, "none")
+    k = clamp_recall_k(k, config.max_recall_k)
     query_embedding = embedder(query, config.embedding_dimensions)
     query_tokens = frozenset(tokenize(query))
     pool = build_candidate_pool(

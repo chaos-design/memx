@@ -12,6 +12,7 @@ from ...retrieval.global_search import (
     keyword_rank_records,
     relevance_diagnostics,
 )
+from ...utils.validation import clamp_recall_k
 from ..context import build_context, iter_scope_states, snapshot_records
 from ..parsing import join_words
 from ..result import CliResult, result
@@ -105,7 +106,7 @@ def handle_retrieval_fts5(args: Any) -> CliResult:
         records,
         join_words(args.query),
         context.memory.config,
-        k=args.top_k,
+        k=_top_k_for_args(context, args),
         include_archived=args.include_archived,
         **_graph_kwargs_for_args(context, args),
     )
@@ -129,7 +130,7 @@ def handle_retrieval_keywords(args: Any) -> CliResult:
     payload = keyword_rank_records(
         records,
         join_words(args.query),
-        k=args.top_k,
+        k=_top_k_for_args(context, args),
         include_archived=args.include_archived,
     )
     payload["scope_mode"] = "all" if args.all_scopes else "current"
@@ -153,7 +154,7 @@ def handle_retrieval_rerank(args: Any) -> CliResult:
         records,
         join_words(args.query),
         context.memory.config,
-        k=args.top_k,
+        k=_top_k_for_args(context, args),
         include_archived=args.include_archived,
     )
     payload["scope_mode"] = "all" if args.all_scopes else "current"
@@ -177,7 +178,7 @@ def handle_retrieval_relevance(args: Any) -> CliResult:
         records,
         join_words(args.query),
         context.memory.config,
-        k=args.top_k,
+        k=_top_k_for_args(context, args),
         include_archived=args.include_archived,
         mem_id=args.mem_id,
     )
@@ -202,7 +203,7 @@ def handle_retrieval_score(args: Any) -> CliResult:
         records,
         join_words(args.query),
         context.memory.config,
-        k=args.top_k,
+        k=_top_k_for_args(context, args),
         include_archived=args.include_archived,
         mem_id=args.mem_id,
     )
@@ -224,6 +225,25 @@ def _add_query_args(parser: argparse.ArgumentParser) -> None:
     """
     parser.add_argument("query", nargs="+")
     parser.add_argument("-k", "--top-k", type=int, default=8)
+
+
+def _top_k_for_args(context: Any, args: Any) -> int:
+    """Return the requested top-k clamped to the configured ceiling.
+
+    CLI 的 top-k 完全来自用户输入，而 library 层只有拿到 config 的入口才会
+    自行收敛。keyword_rank_records 没有 config 参数，必须在此收口，否则
+    `mem retrieval keywords -k 100000` 会把整个作用域塞进 JSON payload。
+
+    输入:
+        context: CLI runtime context。
+        args: argparse namespace。
+    输出:
+        int: 收敛后的 top-k。
+    示例:
+        示例输入: _top_k_for_args(context, args)
+        示例输出: 8
+    """
+    return clamp_recall_k(args.top_k, context.memory.config.max_recall_k)
 
 
 def _add_record_scope_args(parser: argparse.ArgumentParser) -> None:

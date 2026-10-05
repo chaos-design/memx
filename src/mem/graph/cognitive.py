@@ -43,6 +43,10 @@ class CognitiveGraph:
         # label 去重索引：scope_id -> "type:normalized_label" -> node_id。
         self._label_index: DefaultDict[str, Dict[str, str]] = defaultdict(dict)
 
+        # 失效证据集合：scope_id -> 已失效 evidence_id 集合。
+        # 必须持久化，否则重启后 status 无从重算——SUPERSEDED 会被误复活。
+        self._stale_evidence: DefaultDict[str, Set[str]] = defaultdict(set)
+
     def add_insight(
         self,
         scope_id: str,
@@ -220,13 +224,20 @@ class CognitiveGraph:
         return removed
 
     def mark_evidence_stale(self, scope_id: str, evidence_ids: List[str]) -> int:
-        """Mark insight nodes superseded when their evidence changed.
+        """Mark insight nodes superseded once none of their evidence is valid.
+
+        判死条件是「有效证据为空」，而非「任一证据失效」：一条洞察可能由多条
+        证据支撑，只替换其中一条并不意味着整条结论失效。若按 ANY 语义判死，
+        仍被有效证据支撑的洞察会从检索中永久消失。
+
+        status 是由 (evidence_ids, _stale_evidence) 推导的派生值，不是不倒写的
+        latch：证据重新被观察到时（_upsert_node 追加 evidence_ids）会自动复活。
 
         输入:
             scope_id: 作用域 ID。
             evidence_ids: 已被替换或失效的证据 ID。
         输出:
-            int: 被标记为 superseded 的节点数量。
+            int: 本次新变为 superseded 的节点数量。
         示例:
             示例输入: graph.mark_evidence_stale("scope", ["m1"])
             示例输出: 1
@@ -234,14 +245,51 @@ class CognitiveGraph:
         affected = set(evidence_ids)
         if not affected:
             return 0
+        self._stale_evidence[scope_id].update(affected)
         changed = 0
         for node in self._nodes.get(scope_id, {}).values():
-            if node.node_type == NodeType.INSIGHT and affected.intersection(
-                node.evidence_ids
-            ):
-                node.status = InsightStatus.SUPERSEDED
+            if node.node_type != NodeType.INSIGHT:
+                continue
+            previous = node.status
+            self._refresh_insight_status(node)
+            if previous != node.status and node.status == InsightStatus.SUPERSEDED:
                 changed += 1
         return changed
+
+    def _refresh_insight_status(self, node: GraphNode) -> None:
+        """Recompute an insight status from its valid evidence.
+
+        输入:
+            node: 待重算的洞察节点。
+        输出:
+            None；就地更新 node.status。
+        示例:
+            示例输入: graph._refresh_insight_status(insight_node)
+            示例输出: None；status 变为 ACTIVE 或 SUPERSEDED。
+        """
+        if node.node_type != NodeType.INSIGHT:
+            return
+        stale = self._stale_evidence.get(node.scope_id, set())
+        # 无证据的洞察无从判断有效性，保持 ACTIVE：
+        # 它们靠剪枝淘汰，而不是被级联失效误杀。
+        if not node.evidence_ids:
+            node.status = InsightStatus.ACTIVE
+            return
+        valid = [eid for eid in node.evidence_ids if eid not in stale]
+        node.status = InsightStatus.ACTIVE if valid else InsightStatus.SUPERSEDED
+
+    def stale_evidence_ids(self, scope_id: str) -> Set[str]:
+        """Return the stale evidence IDs recorded for one scope.
+
+        输入:
+            scope_id: 作用域 ID。
+        输出:
+            set[str]: 已失效证据 ID 集合。
+        示例:
+            示例输入: graph.stale_evidence_ids("scope")
+            示例输出: {"m1"}
+        """
+        return set(self._stale_evidence.get(scope_id, set()))
 
     def audit(self, scope_id: str, repair: bool = True) -> Dict[str, int]:
         """Audit graph consistency and optionally repair orphan edges.
@@ -360,6 +408,8 @@ class CognitiveGraph:
             for evidence_id in evidence_ids:
                 if evidence_id not in node.evidence_ids:
                     node.evidence_ids.append(evidence_id)
+            # 新证据可能是有效的，status 必须随之重算以支持复活。
+            self._refresh_insight_status(node)
             return node
         node_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"{scope_id}:{key}"))
         node = GraphNode(
