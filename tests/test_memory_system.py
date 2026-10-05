@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import math
+import os
+import tempfile
 
 import pytest
 
@@ -20,7 +22,7 @@ from mem.embedding.scoring import (
     user_emphasis_score,
 )
 from mem.embedding.vector import cosine_similarity, embed_text, token_count, tokenize
-from mem.exceptions import ConfigurationError
+from mem.exceptions import ConfigurationError, ValidationError
 from mem.graph.cognitive import CognitiveGraph
 from mem.ingest.buffer import ConversationBuffer
 from mem.ingest.inbox import InMemoryInbox
@@ -50,8 +52,10 @@ from mem.memory.models import (
     ensure_sequence,
 )
 from mem.memory.semantic import SemanticStore
+from mem.persistence.hydration import _restore_l4
 from mem.retrieval import build_candidate_pool, fts5_global_semantic_search
 from mem.schemas.ddl import reference_ddl
+from mem.utils.validation import clamp_recall_k
 
 
 def test_config_boundaries_and_dynamic_threshold() -> None:
@@ -565,6 +569,63 @@ def test_prune_keeps_label_index_consistent_with_nodes() -> None:
     assert [node.node_id for node in graph.all_nodes("t1")] == [revived.node_id]
 
 
+def test_insight_status_is_derived_from_remaining_valid_evidence() -> None:
+    """Verify SUPERSEDED means "no valid evidence left", and that it can revive.
+
+    status 此前是只写 latch：任一证据失效即判死且永不复活。多证据洞察只替换
+    一条证据时，仍被有效证据支撑的结论会从检索中永久消失；status 也无法由
+    evidence_ids 重算，快照往返后更无从判断有效性。
+
+    输入:
+        无；构造双证据洞察，逐条失效、复活，再做一次快照往返。
+    输出:
+        None；断言判死与复活语义，以及失效集合随快照持久化。
+    示例输入:
+        pytest tests/test_memory_system.py -k insight_status_is_derived
+    示例输出:
+        测试通过。
+    """
+    graph = CognitiveGraph(MemoryConfig())
+    node = graph._upsert_node("t1", "复合洞察", NodeType.INSIGHT, ["m1", "m2"], 0.9)
+
+    # 部分失效：m2 仍有效，不得判死。
+    assert graph.mark_evidence_stale("t1", ["m1"]) == 0
+    assert node.status == InsightStatus.ACTIVE
+    graph.mark_evidence_stale("t1", ["m2"])
+    assert node.status == InsightStatus.SUPERSEDED
+
+    # 重复标记同一证据不重复计数。
+    assert graph.mark_evidence_stale("t1", ["m2"]) == 0
+
+    # 复活：新证据进入后 status 必须重算，而不是永久停在 superseded。
+    graph._upsert_node("t1", "复合洞察", NodeType.INSIGHT, ["m9"], 0.9)
+    assert node.status == InsightStatus.ACTIVE
+    assert graph.graph_query("t1", "复合洞察")["nodes"]
+
+    # 无证据洞察无从判断有效性，必须保持 ACTIVE（靠剪枝而非级联失效淘汰）。
+    orphan = graph._upsert_node("t1", "无证据洞察", NodeType.INSIGHT, [], 0.9)
+    graph.mark_evidence_stale("t1", ["unrelated"])
+    assert orphan.status == InsightStatus.ACTIVE
+
+    # 失效证据集合必须随快照落盘：status 由它推导，丢了它重启后会误复活。
+    graph._upsert_node("t1", "待失效洞察", NodeType.INSIGHT, ["m7"], 0.9)
+    graph.mark_evidence_stale("t1", ["m7"])
+    snapshot = {
+        "l4": {
+            "nodes": [n.to_dict() for n in graph.all_nodes("t1")],
+            "edges": [],
+            "stale_evidence": sorted(graph.stale_evidence_ids("t1")),
+        }
+    }
+    restored = CognitiveGraph(MemoryConfig())
+    assert _restore_l4(restored, "t1", snapshot) == 3
+    assert "m7" in restored.stale_evidence_ids("t1")
+    stale_labels = [
+        n["label"] for n in restored.graph_query("t1", "待失效洞察")["nodes"]
+    ]
+    assert stale_labels == []
+
+
 def test_sparse_candidate_pool_ranks_by_query_overlap_before_heat() -> None:
     """Verify sparse-bounded truncation keeps the most query-relevant record.
 
@@ -617,6 +678,177 @@ def test_sparse_candidate_pool_ranks_by_query_overlap_before_heat() -> None:
     assert len(pool.candidates) == 64
     assert pool.candidates[0].mem_id == "m_target"
     assert any(candidate.mem_id == "m_target" for candidate in pool.candidates)
+
+
+def test_retrieval_entry_points_clamp_k_to_max_recall_k() -> None:
+    """Verify every retrieval entry point converges k to max_recall_k.
+
+    max_recall_k 的语义是「统一返回上限，防止调用方放大关键路径成本」，但
+    validate_recall_k 只在 service.recall 被调用，公开检索 API 与 CLI 全部
+    绕过。危害不只是读放大：recall 会对每条返回记录做 access_count += 1，
+    一次超限召回把整个作用域热度拉平，永久削弱之后所有查询的候选池质量。
+
+    输入:
+        无；请求 k=4000 而 max_recall_k=50。
+    输出:
+        None；断言返回值不超过配置上限，且低于上限时不受影响。
+    示例输入:
+        pytest tests/test_memory_system.py -k retrieval_entry_points_clamp
+    示例输出:
+        测试通过。
+    """
+    config = MemoryConfig(max_recall_k=50)
+
+    def record(mem_id: str, text: str) -> EpisodicMemory:
+        return EpisodicMemory(
+            mem_id=mem_id,
+            text=text,
+            scope_id="s1",
+            importance=5,
+            access_count=0,
+            embedding=embed_text(text, config.embedding_dimensions),
+            ts_create=0.0,
+            ts_last_access=0.0,
+        )
+
+    records = [record("m%03d" % index, "目标内容") for index in range(120)]
+    payload = fts5_global_semantic_search(records, "目标内容", config, k=4000)
+    assert len(payload["results"]) == 50
+    assert payload["requested_k"] == 4000
+    # 未超限时不得被裁剪。
+    assert len(
+        fts5_global_semantic_search(records, "目标内容", config, k=5)["results"]
+    ) == 5
+    # k 非正时仍走空结果分支，不被 clamp 抬成 1。
+    assert (
+        fts5_global_semantic_search(records, "目标内容", config, k=0)["results"] == []
+    )
+    assert clamp_recall_k(4000, 50) == 50
+    assert clamp_recall_k(5, 50) == 5
+    assert clamp_recall_k(-3, 50) == 1
+    with pytest.raises(ValidationError):
+        clamp_recall_k(5, 0)
+
+
+def test_related_score_responds_to_seed_salience() -> None:
+    """Verify related neighbors use the real seed score, not the fallback.
+
+    related() 的每个邻居都由 seed_ids 筛出，却漏传 base_score 而吃到默认值
+    1.0，导致 related_score 与种子显著度完全无关：调整种子显著度不改变分数。
+    修复前该值恒为 0.8 * 1.0 * edge_weight。
+
+    输入:
+        无；同一结构只改种子显著度，比较 related_score。
+    输出:
+        None；断言分数随种子显著度变化且不超过融合路同数量级。
+    示例输入:
+        pytest tests/test_memory_system.py -k related_score_responds
+    示例输出:
+        测试通过。
+    """
+    config = MemoryConfig()
+
+    def record(mem_id: str, text: str) -> EpisodicMemory:
+        return EpisodicMemory(
+            mem_id=mem_id,
+            text=text,
+            scope_id="s1",
+            importance=5,
+            access_count=0,
+            embedding=embed_text(text, config.embedding_dimensions),
+            ts_create=0.0,
+            ts_last_access=0.0,
+        )
+
+    def related_score(seed_salience: float):
+        graph = CognitiveGraph(config)
+        seed = graph._upsert_node(
+            "s1", "部署清单", NodeType.INSIGHT, ["m_seed"], seed_salience
+        )
+        neighbor = graph._upsert_node(
+            "s1", "部署验证", NodeType.ENTITY, ["m_b"], 0.5
+        )
+        graph._upsert_edge("s1", seed.node_id, neighbor.node_id, EdgeType.CAUSE, 0.8)
+        payload = fts5_global_semantic_search(
+            [record("m_seed", "部署清单验证"), record("m_b", "部署清单验证")],
+            "部署清单",
+            config,
+            k=1,
+            graph=graph,
+        )
+        scores = [
+            item["related_score"]
+            for item in payload["related"]
+            if item["mem_id"] == "m_b"
+        ]
+        return scores[0] if scores else None
+
+    low = related_score(0.1)
+    high = related_score(0.9)
+    assert low is not None and high is not None
+    # 关键不变式：分数必须响应种子显著度。
+    assert low < high
+    # 修复前两者都等于 0.8 * 1.0 * 0.8 = 0.64。
+    assert low != pytest.approx(0.64)
+    assert high == pytest.approx(0.8 * 0.9 * 0.8)
+
+
+def test_config_rejects_out_of_domain_bounds() -> None:
+    """Verify config fields whose absence silently disables a subsystem.
+
+    这些字段此前无边界校验，且失效方式是「静默降级」而非报错：窗口容量为负
+    会让 L0 窗口恒空、衰减系数取 0 让显著度只反映支撑项、RRF 常量取负直接
+    ZeroDivisionError、F2 权重和不为 1 让相关度脱离 [0,1] 标度。
+
+    输入:
+        无；逐个传入越界值。
+    输出:
+        None；断言构造期即拒绝。
+    示例输入:
+        pytest tests/test_memory_system.py -k config_rejects_out_of_domain
+    示例输出:
+        测试通过。
+    """
+    for kwargs in (
+        {"raw_window_turns": 0},
+        {"raw_window_turns": -1},
+        {"graph_salience_decay": 0.0},
+        {"graph_salience_decay": 1.5},
+        {"rrf_k0": 0},
+        {"rrf_k0": -1},
+        {"graph_prune_threshold": 1.5},
+        {"f2_weight_recency": -1.0},
+        {"f2_weight_relevance": 30.0, "f2_weight_recency": 0.0},
+    ):
+        with pytest.raises(ValueError):
+            MemoryConfig(**kwargs)
+    # 边界内仍必须合法。
+    MemoryConfig(
+        raw_window_turns=1,
+        graph_salience_decay=1.0,
+        rrf_k0=1,
+        graph_prune_threshold=0.0,
+    )
+
+
+def test_config_path_os_errors_surface_as_configuration_error() -> None:
+    """Verify unreadable config paths are normalized to ConfigurationError.
+
+    JSON 语法错早已收敛，但路径是目录、无读权限抛的是 OSError 而非
+    ValueError，原样逃逸会让 CLI/HTTP 拿到与其他配置错误不一致的 error_type。
+
+    输入:
+        无；把配置路径指向一个目录。
+    输出:
+        None；断言收敛为 ConfigurationError。
+    示例输入:
+        pytest tests/test_memory_system.py -k config_path_os_errors
+    示例输出:
+        测试通过。
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        with pytest.raises(ConfigurationError):
+            load_memory_config(path=os.path.join(tmpdir, "."))
 
 
 def test_config_narrows_widened_numeric_values_to_declared_types() -> None:

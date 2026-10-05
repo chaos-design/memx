@@ -657,6 +657,9 @@ class AgentMemory:
             "l4": {
                 "nodes": [node.to_dict() for node in self.l4.all_nodes(scope_id)],
                 "edges": [edge.to_dict() for edge in self.l4.all_edges(scope_id)],
+                # 失效证据集合必须随快照落盘：status 由它推导，
+                # 丢了它重启后 SUPERSEDED 洞察会被误判为有效。
+                "stale_evidence": sorted(self.l4.stale_evidence_ids(scope_id)),
             },
             "inbox": self.inbox.snapshot(scope_id),
             "persistence": self.persistence.stats(scope_id),

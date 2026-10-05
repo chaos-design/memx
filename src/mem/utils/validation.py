@@ -10,6 +10,30 @@ from ..exceptions import ConfigurationError, ValidationError
 _SEQUENCE_ORIGINS = (list, tuple, set, frozenset)
 
 
+def clamp_recall_k(k: int, max_recall_k: int) -> int:
+    """Clamp a requested result count to the configured ceiling.
+
+    用于检索类入口：max_recall_k 的语义是「统一返回上限，防止调用方放大
+    关键路径成本」。这类入口不应抛异常（超限是调用方的正常诉求），但也不能
+    无界放行——一次 k=4000 的 recall 不只是读放大，recall 会对每条返回记录
+    做 access_count += 1，把整个作用域的热度信号一次性拉平，永久削弱之后
+    所有查询的候选池质量。
+
+    输入:
+        k: 请求返回数量。
+        max_recall_k: 配置允许的最大返回数量。
+    输出:
+        int: 收敛到 [1, max_recall_k] 的返回数量。
+    示例:
+        示例输入: clamp_recall_k(4000, 50)
+        示例输出: 50
+    """
+    if max_recall_k <= 0:
+        msg = "max_recall_k must be positive."
+        raise ValidationError(msg)
+    return max(1, min(k, max_recall_k))
+
+
 def validate_recall_k(k: int, max_recall_k: int) -> None:
     """Validate a recall size against configured bounds.
 

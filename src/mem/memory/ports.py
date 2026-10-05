@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, Iterable, List, Optional, Protocol
+from typing import Any, Dict, Iterable, List, Optional, Protocol, Set
 
 from .models import (
     ConsolidationInboxItem,
@@ -548,16 +548,32 @@ class L4GraphPort(Protocol):
         ...
 
     def mark_evidence_stale(self, scope_id: str, evidence_ids: List[str]) -> int:
-        """Mark insights stale when their evidence is superseded.
+        """Mark insights stale once none of their evidence is valid.
+
+        判死条件是有效证据为空，而非任一证据失效；status 由证据集合推导，
+        证据重新被观察到时应自动复活。
 
         输入:
             scope_id: 作用域 ID。
             evidence_ids: 失效证据 ID。
         输出:
-            int: 被标记节点数。
+            int: 本次新变为 superseded 的节点数。
         示例:
             示例输入: port.mark_evidence_stale("t1", ["m1"])
             示例输出: 1
+        """
+        ...
+
+    def stale_evidence_ids(self, scope_id: str) -> Set[str]:
+        """Return the recorded stale evidence IDs for one scope.
+
+        输入:
+            scope_id: 作用域 ID。
+        输出:
+            set[str]: 已失效证据 ID 集合。
+        示例:
+            示例输入: port.stale_evidence_ids("t1")
+            示例输出: {"m1"}
         """
         ...
 
