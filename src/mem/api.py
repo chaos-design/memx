@@ -258,6 +258,36 @@ class HumanMem:
             self._project_scope_id(),
         )
 
+    def assemble_prompt(
+        self,
+        session_id: str,
+        user_input: str,
+        system_prompt: str,
+        query: Optional[str] = None,
+    ) -> List[Dict[str, str]]:
+        """Assemble Chat API messages with recalled memory.
+
+        输入:
+            session_id: 会话 ID。
+            user_input: 当前用户输入。
+            system_prompt: Agent 的基础系统指令。
+            query: 可选召回 query；默认使用 user_input。
+        输出:
+            list[dict]: 可直接传给 Chat API 的 messages。
+        示例:
+            示例输入:
+                api.assemble_prompt("s1", "我的语言偏好？", "回答要简洁。")
+            示例输出:
+                [{"role": "system", ...}, {"role": "user", ...}]
+        """
+        return self.memory.assemble_prompt(
+            session_id=session_id,
+            user_input=user_input,
+            system_prompt=system_prompt,
+            query=query,
+            scope_id=self._project_scope_id(),
+        )
+
     def flush(self) -> str:
         """Flush the project memory state.
 
