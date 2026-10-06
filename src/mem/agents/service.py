@@ -26,7 +26,11 @@ from ..utils.hashing import short_hash
 from ..utils.text import extract_entities, insight_label, is_explicit_memory
 from ..utils.validation import validate_recall_k
 from .consolidation import ConsolidationAgent
-from .prompts import render_episodes_context, render_facts_context
+from .prompts import (
+    assemble_prompt_messages,
+    render_episodes_context,
+    render_facts_context,
+)
 from .recall import RecallAgent
 
 # 显式 key=value 记忆提取规则，支持中文“记住”和英文 remember 前缀。
@@ -233,6 +237,42 @@ class AgentMemory:
             if episodes_context:
                 parts.append(episodes_context)
         return "\n".join(part for part in parts if part)
+
+    def assemble_prompt(
+        self,
+        session_id: str,
+        user_input: str,
+        system_prompt: str,
+        query: Optional[str] = None,
+        scope_id: str = "default",
+    ) -> List[Dict[str, str]]:
+        """Assemble provider-ready messages with relevant memory context.
+
+        输入:
+            session_id: 会话 ID。
+            user_input: 当前用户输入。
+            system_prompt: Agent 的基础系统指令。
+            query: 可选召回 query；默认使用 user_input。
+            scope_id: 作用域 ID。
+        输出:
+            list[dict]: system、memory context 和 user 消息。
+        示例:
+            示例输入:
+                memory.assemble_prompt("s1", "我的语言偏好？", "回答要简洁。")
+            示例输出:
+                [{"role": "system", ...}, {"role": "user", ...}]
+        """
+        base_messages = assemble_prompt_messages(system_prompt, user_input)
+        clean_user_input = base_messages[-1]["content"]
+        recall_query = clean_user_input if query is None else query
+        memory_context = self.get_context(session_id, recall_query, scope_id)
+        if not memory_context:
+            return base_messages
+        return assemble_prompt_messages(
+            system_prompt=base_messages[0]["content"],
+            user_input=clean_user_input,
+            memory_context=memory_context,
+        )
 
     def upsert_fact(self, fact: Dict[str, Any]) -> Dict[str, Any]:
         """Upsert an L3 fact through the unified interface.
