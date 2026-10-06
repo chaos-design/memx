@@ -6,7 +6,7 @@ import json
 from dataclasses import asdict
 from typing import Any, Dict, Sequence
 
-from ..config import MemoryConfig
+from ..config import LLM_CONFIG_FIELDS, MemoryConfig
 from .result import CliError
 
 
@@ -21,7 +21,11 @@ def config_to_dict(config: MemoryConfig) -> Dict[str, Any]:
         示例输入: config_to_dict(MemoryConfig(max_recall_k=10))
         示例输出: {"max_recall_k": 10, ...}
     """
-    return json_safe(asdict(config))
+    payload = json_safe(asdict(config))
+    for field_name in LLM_CONFIG_FIELDS:
+        if "key" in field_name and payload.get(field_name):
+            payload[field_name] = "***"
+    return payload
 
 
 def parse_key_value_updates(pairs: Sequence[str]) -> Dict[str, Any]:
