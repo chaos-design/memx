@@ -25,6 +25,32 @@ class CandidatePoolResult:
     source: str
 
 
+def candidate_limit_for(k: int, config: MemoryConfig) -> int:
+    """Return the shared candidate ceiling for k.
+
+    候选上限此前在两处各算一遍且口径不同：候选池尊重
+    retrieval_candidate_hard_limit，pipeline 的 _route_limit 不尊重。
+    上限存在的意义是给无界扫描封顶，两处不一致等于有一处没有上限。
+    收敛到唯一实现，避免新增检索入口时再次分叉。
+
+    输入:
+        k: 请求返回数量。
+        config: 系统配置。
+    输出:
+        int: 候选数量上限。
+    示例:
+        示例输入: candidate_limit_for(8, config)
+        示例输出: 64
+    """
+    return max(
+        k,
+        min(
+            k * config.retrieval_candidate_multiplier * 4,
+            config.retrieval_candidate_hard_limit,
+        ),
+    )
+
+
 def retrievable_candidates(
     records: Mapping[str, EpisodicMemory],
     include_archived: bool,
@@ -192,13 +218,7 @@ def _sparse_candidate_pool(
     """
     by_id = {memory.mem_id: memory for memory in all_candidates}
     matched = [by_id[mem_id] for mem_id in matched_ids if mem_id in by_id]
-    candidate_limit = max(
-        k,
-        min(
-            k * config.retrieval_candidate_multiplier * 4,
-            config.retrieval_candidate_hard_limit,
-        ),
-    )
+    candidate_limit = candidate_limit_for(k, config)
     if len(matched) >= candidate_limit:
         return CandidatePoolResult(
             nlargest(

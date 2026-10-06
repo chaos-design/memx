@@ -530,58 +530,6 @@ def _fts5_query(query_tokens: Iterable[str]) -> str:
     return " OR ".join(quoted)
 
 
-def _global_candidate_set(
-    records: Sequence[EpisodicMemory],
-    query_embedding: Sequence[float],
-    query_tokens: frozenset,
-    fts_scores: Mapping[str, float],
-    config: MemoryConfig,
-    k: int,
-) -> List[EpisodicMemory]:
-    """Build a bounded candidate set from FTS, semantic, and hot signals.
-
-    输入:
-        records: 可检索 L2 记录集合。
-        query_embedding: query embedding。
-        query_tokens: query token 集合。
-        fts_scores: mem_id 到 FTS 分数的映射。
-        config: 当前 MemoryConfig。
-        k: 目标返回数量。
-    输出:
-        list[EpisodicMemory]: 候选集合。
-    示例:
-        示例输入: _global_candidate_set([memory], embedding, tokens, {}, config, 8)
-        示例输出: [memory]
-    """
-    limit = min(
-        len(records),
-        max(k, k * config.retrieval_candidate_multiplier * 4),
-    )
-    by_id = {memory.mem_id: memory for memory in records}
-    selected: Dict[str, EpisodicMemory] = {
-        mem_id: by_id[mem_id] for mem_id in fts_scores if mem_id in by_id
-    }
-    semantic = sorted(
-        records,
-        key=lambda memory: cosine_similarity(query_embedding, memory.embedding),
-        reverse=True,
-    )[:limit]
-    keyword = sorted(
-        records,
-        key=lambda memory: keyword_overlap_tokens(
-            query_tokens,
-            frozenset(tokenize(memory.text)),
-        ),
-        reverse=True,
-    )[:limit]
-    hot = sorted(records, key=hot_candidate_score, reverse=True)[: max(k, 1)]
-    for memory in semantic + keyword + hot:
-        selected.setdefault(memory.mem_id, memory)
-        if len(selected) >= limit:
-            break
-    return list(selected.values())
-
-
 def _inverted_index(token_index: Mapping[str, frozenset]) -> Dict[str, Set[str]]:
     """Build a token inverted index for diagnostics.
 

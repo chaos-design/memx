@@ -1,6 +1,10 @@
 """Hybrid retrieval helpers for MemX."""
 
-from .candidate_pool import CandidatePoolResult, build_candidate_pool
+from .candidate_pool import (
+    CandidatePoolResult,
+    build_candidate_pool,
+    candidate_limit_for,
+)
 from .global_search import (
     fts5_global_semantic_search,
     hybrid_rerank_diagnostics,
@@ -33,6 +37,7 @@ __all__ = [
     "RetrievalOutcome",
     "RouteResult",
     "build_candidate_pool",
+    "candidate_limit_for",
     "fts5_global_semantic_search",
     "hot_candidate_score",
     "hybrid_rerank_diagnostics",

@@ -11,6 +11,7 @@ from ..embedding.vector import cosine_similarity, embed_text, tokenize
 from ..memory.models import EpisodicMemory, MemoryStatus
 from ..models.enums import InsightStatus
 from ..utils.validation import clamp_recall_k
+from .candidate_pool import candidate_limit_for
 from .ranking import keyword_overlap_tokens
 
 HYBRID_RRF_ENGINE = "hybrid_rrf"
@@ -965,6 +966,9 @@ def _eligible_records(
 def _route_limit(record_count: int, k: int, config: MemoryConfig) -> int:
     """Return a bounded per-route candidate limit.
 
+    上限来自candidate_limit_for，与候选池共用同一实现：此前这里自行计算且
+    不尊重 retrieval_candidate_hard_limit，等于三路检索有一条无上限。
+
     输入:
         record_count: 可检索记录数量。
         k: Top-K 主结果数量。
@@ -975,10 +979,7 @@ def _route_limit(record_count: int, k: int, config: MemoryConfig) -> int:
         示例输入: _route_limit(100, 8, config)
         示例输出: 64
     """
-    return min(
-        record_count,
-        max(k, k * config.retrieval_candidate_multiplier * 4),
-    )
+    return min(record_count, candidate_limit_for(k, config))
 
 
 def _record_scopes(records: Sequence[EpisodicMemory]) -> List[str]:
