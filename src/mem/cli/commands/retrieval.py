@@ -108,6 +108,7 @@ def handle_retrieval_fts5(args: Any) -> CliResult:
         context.memory.config,
         k=_top_k_for_args(context, args),
         include_archived=args.include_archived,
+        embedder=context.memory.l2.embedder,
         **_graph_kwargs_for_args(context, args),
     )
     payload["scope_mode"] = "all" if args.all_scopes else "current"
@@ -156,6 +157,7 @@ def handle_retrieval_rerank(args: Any) -> CliResult:
         context.memory.config,
         k=_top_k_for_args(context, args),
         include_archived=args.include_archived,
+        embedder=context.memory.l2.embedder,
     )
     payload["scope_mode"] = "all" if args.all_scopes else "current"
     return result("retrieval", payload, "retrieval rerank diagnostics completed")
@@ -181,6 +183,7 @@ def handle_retrieval_relevance(args: Any) -> CliResult:
         k=_top_k_for_args(context, args),
         include_archived=args.include_archived,
         mem_id=args.mem_id,
+        embedder=context.memory.l2.embedder,
     )
     payload["scope_mode"] = "all" if args.all_scopes else "current"
     return result("retrieval", payload, "retrieval relevance diagnostics completed")
@@ -206,6 +209,7 @@ def handle_retrieval_score(args: Any) -> CliResult:
         k=_top_k_for_args(context, args),
         include_archived=args.include_archived,
         mem_id=args.mem_id,
+        embedder=context.memory.l2.embedder,
     )
     payload["score_model"] = "F2"
     payload["scope_mode"] = "all" if args.all_scopes else "current"
