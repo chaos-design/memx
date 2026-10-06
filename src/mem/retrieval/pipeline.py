@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Mapping, Optional, Protocol, Sequence, Set
 
 from ..config.settings import MemoryConfig
+from ..embedding.provider import Embedder
 from ..embedding.vector import cosine_similarity, embed_text, tokenize
 from ..memory.models import EpisodicMemory, MemoryStatus
 from ..models.enums import InsightStatus
@@ -599,6 +600,7 @@ class HybridSearchPipeline:
         config: MemoryConfig,
         retrievers: Sequence[Retriever],
         reranker: Optional[CrossEncoderReranker] = None,
+        embedder: Embedder = embed_text,
     ) -> None:
         """Initialize a hybrid retrieval pipeline.
 
@@ -606,6 +608,7 @@ class HybridSearchPipeline:
             config: MemoryConfig 配置对象。
             retrievers: 三路或多路检索 Port 实例。
             reranker: 可选重排序 Port。
+            embedder: 当前运行时统一向量函数。
         输出:
             None。
         示例:
@@ -615,6 +618,7 @@ class HybridSearchPipeline:
         self.config = config
         self.retrievers = list(retrievers)
         self.reranker = reranker or DeterministicCrossEncoderReranker()
+        self.embedder = embedder
 
     def search(
         self,
@@ -644,7 +648,7 @@ class HybridSearchPipeline:
         k = clamp_recall_k(k, self.config.max_recall_k)
         now = time.time() if now_ts is None else now_ts
         query_tokens = frozenset(tokenize(query))
-        query_embedding = embed_text(query, self.config.embedding_dimensions)
+        query_embedding = self.embedder(query, self.config.embedding_dimensions)
         eligible = _eligible_records(records, include_archived)
         request = SearchRequest(
             query=query,

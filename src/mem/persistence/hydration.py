@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, Mapping
 
-from ..embedding.vector import embed_text, tokenize
+from ..embedding.vector import tokenize
 from ..memory.models import (
     ConflictAction,
     ConflictRecord,
@@ -148,7 +148,12 @@ def _restore_l2(
     for item in state.get("l2", []):
         if not isinstance(item, Mapping):
             continue
-        record = _episodic_from_dict(item, config, scope_id)
+        record = _episodic_from_dict(
+            item,
+            config,
+            scope_id,
+            embedder=store.embedder,
+        )
         store._records[record.scope_id][record.mem_id] = record
         store._index_memory(
             record.scope_id,
@@ -188,7 +193,12 @@ def _restore_l3(
     for item in raw_l3.get("facts", []):
         if not isinstance(item, Mapping):
             continue
-        fact = _semantic_fact_from_dict(item, config, scope_id)
+        fact = _semantic_fact_from_dict(
+            item,
+            config,
+            scope_id,
+            embedder=store.embedder,
+        )
         store._facts[fact.scope_id].setdefault(fact.fact_key, []).append(fact)
         store._index_fact(fact)
         restored += 1
@@ -314,6 +324,7 @@ def _episodic_from_dict(
     item: Mapping[str, Any],
     config: Any,
     scope_id: str,
+    embedder: Any,
 ) -> EpisodicMemory:
     """Build an EpisodicMemory model from persisted JSON fields.
 
@@ -321,6 +332,7 @@ def _episodic_from_dict(
         item: EpisodicMemory.to_dict 输出。
         config: MemoryConfig-compatible settings.
         scope_id: 缺省作用域 ID。
+        embedder: 当前运行时统一向量函数。
     输出:
         EpisodicMemory: 恢复后的 L2 记录。
     示例:
@@ -330,7 +342,7 @@ def _episodic_from_dict(
     text = str(item.get("text", ""))
     return EpisodicMemory(
         mem_id=str(item.get("mem_id", "")),
-        embedding=embed_text(text, config.embedding_dimensions),
+        embedding=embedder(text, config.embedding_dimensions),
         text=text,
         importance=int(item.get("importance", 5)),
         ts_create=float(item.get("ts_create", 0.0)),
@@ -348,6 +360,7 @@ def _semantic_fact_from_dict(
     item: Mapping[str, Any],
     config: Any,
     scope_id: str,
+    embedder: Any,
 ) -> SemanticFact:
     """Build a SemanticFact model from persisted JSON fields.
 
@@ -355,6 +368,7 @@ def _semantic_fact_from_dict(
         item: SemanticFact.to_dict 输出。
         config: MemoryConfig-compatible settings.
         scope_id: 缺省作用域 ID。
+        embedder: 当前运行时统一向量函数。
     输出:
         SemanticFact: 恢复后的 L3 事实。
     示例:
@@ -376,7 +390,7 @@ def _semantic_fact_from_dict(
         mem_type=MemoryType(str(item.get("mem_type", MemoryType.SEMANTIC.value))),
         partition=str(item.get("partition", "semantic")),
     )
-    fact.embedding = embed_text(fact.content_text(), config.embedding_dimensions)
+    fact.embedding = embedder(fact.content_text(), config.embedding_dimensions)
     return fact
 
 
