@@ -240,7 +240,7 @@ def salience_update(
         float: 限制在 0-1 的新显著度。
     示例:
         示例输入: salience_update(0.5, 2, 0.3, 0.8)
-        示例输出: 0.58
+        示例输出: 0.5
     """
     if max_ref_count <= 0:
         msg = "max_ref_count must be positive."
