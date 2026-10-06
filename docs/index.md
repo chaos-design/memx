@@ -19,6 +19,10 @@ flowchart LR
 
 | 文档 | 适合读者 | 内容重点 |
 | --- | --- | --- |
+| [完整使用指南](usage.md) | 首次接入、应用开发、运维 | 安装、embedding 选择、SDK、CLI、HTTP 服务和验证 |
+| [架构文档](architecture/README.md) | 架构设计、开发、SRE | 完整架构图、分类、数据结构、固化、检索、决策和路线图 |
+| [架构 HTML Slider](architecture-slider.html) | 评审、分享、项目同步 | 自包含详细架构演示，支持桌面、移动端与打印 |
+| [架构验证矩阵](architecture/verification.md) | Reviewer、测试、发布人员 | 架构主张到 pytest、evals 和发布门禁的证据追踪 |
 | [Agent 记忆系统整体流程](agent-memory-flow.md) | 架构设计、平台工程 | L0-L4 分层、写入链路、读取链路、演化链路 |
 | [能力矩阵](capability-matrix.md) | 产品、架构、接入方 | 能力边界、接口映射、典型使用场景 |
 | [API 参考](api-reference.md) | SDK 接入方、后端工程 | `AgentMemory` 方法、参数、返回结构、错误边界 |
@@ -28,6 +32,7 @@ flowchart LR
 | [配置参考](configuration-reference.md) | 后端工程、SRE | `MemoryConfig` 参数、调优建议、生产推荐 |
 | [生产部署](production-deployment.md) | SRE、后端工程 | Port/Adapter、Redis、PostgreSQL/pgvector、Neo4j、LLM Gateway |
 | [存储与 Schema](storage-schema.md) | 数据平台、DBA | L0-L4 参考 DDL、索引、数据生命周期 |
+| [评测体系](evals.md) | 算法、测试、发布人员 | 数据集、指标、门槛、报告和扩展路线 |
 
 ## 核心概念
 
@@ -61,6 +66,7 @@ sequenceDiagram
 ## 推荐接入顺序
 
 1. 本地使用 `MemoryConfig(backend_mode="memory")` 跑通 `observe -> reflect -> recall`。
+2. 按环境选择 `local` 或 `gateway` embedding，并核对向量维度。
 3. 根据业务 SLA 选择是否同步持久化，生产关键路径建议设置 `persist_on_write=False`。
 4. 配置生产 Adapter 依赖，并使用 `backend_diagnostics()` 做启动前健康检查。
 5. 定期调用 `maintenance(tasks=["consolidate", "forget"])`，并通过 `/health` 观察调度任务与 embedding 状态。

@@ -1,0 +1,2035 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='6' y='6' width='20' height='20' rx='2' transform='rotate(45 16 16)' fill='%2354c76b'/%3E%3C/svg%3E">
+  <title>MemX 架构设计与演进</title>
+  <style>
+    :root {
+      --paper: #f3f0e8;
+      --ink: #171915;
+      --muted: #676b62;
+      --line: #c9c6ba;
+      --green: #54c76b;
+      --blue: #2864dc;
+      --red: #e8583f;
+      --yellow: #f2c84b;
+      --white: #fffef8;
+      --shadow: 0 22px 70px rgba(23, 25, 21, 0.16);
+    }
+
+    * { box-sizing: border-box; }
+    html, body { width: 100%; min-height: 100%; margin: 0; }
+    body {
+      overflow: hidden;
+      color: var(--ink);
+      background: #d8d6cf;
+      font-family: "Avenir Next", "Noto Sans CJK SC", "PingFang SC", sans-serif;
+      letter-spacing: 0;
+    }
+    button { font: inherit; }
+    .app {
+      display: grid;
+      grid-template-rows: 42px minmax(0, 1fr);
+      height: 100vh;
+      height: 100dvh;
+      min-height: 520px;
+    }
+    .topbar, .toolbar {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 0 20px;
+      background: var(--ink);
+      color: var(--paper);
+      z-index: 20;
+    }
+    .topbar { justify-content: space-between; border-bottom: 1px solid #363a33; }
+    .brand { display: flex; align-items: center; gap: 9px; min-width: 0; }
+    .brand-mark { width: 14px; height: 14px; background: var(--green); transform: rotate(45deg); }
+    .brand-name { font: 700 13px/1 "SFMono-Regular", Consolas, monospace; text-transform: uppercase; }
+    .top-meta { color: #b7bbb0; font: 500 11px/1 "SFMono-Regular", Consolas, monospace; white-space: nowrap; }
+    .stage { position: relative; min-height: 0; padding: 0 0 clamp(12px, 1.4vh, 18px); overflow: hidden; }
+    .stage::before {
+      content: "";
+      position: absolute; inset: 0;
+      background-image: linear-gradient(rgba(23,25,21,.05) 1px, transparent 1px), linear-gradient(90deg, rgba(23,25,21,.05) 1px, transparent 1px);
+      background-size: 24px 24px;
+      pointer-events: none;
+    }
+    .deck {
+      position: relative;
+      width: 100%;
+      height: 100%;
+      background: var(--paper);
+      overflow: hidden;
+      isolation: isolate;
+    }
+    .deck::after {
+      content: "";
+      position: absolute; inset: 0;
+      border: 1px solid rgba(23,25,21,.18);
+      pointer-events: none; z-index: 15;
+    }
+    .slide {
+      position: absolute; inset: 0;
+      display: grid;
+      grid-template-rows: auto minmax(0, auto) auto;
+      align-content: center;
+      gap: clamp(8px, .8vw, 12px);
+      padding-block: clamp(22px, 2.7vw, 38px);
+      padding-inline: max(clamp(24px, 3.35vw, 44px), calc((100vw - 1240px) / 2));
+      opacity: 0;
+      visibility: hidden;
+      transform: translateX(44px);
+      transition: opacity .32s ease, transform .38s cubic-bezier(.2,.8,.2,1), visibility .32s;
+      background-color: var(--paper);
+      background-image: radial-gradient(circle at 1px 1px, rgba(23,25,21,.08) 1px, transparent 0);
+      background-size: 20px 20px;
+      overflow-wrap: anywhere;
+      word-break: break-word;
+    }
+    .slide.active { opacity: 1; visibility: visible; transform: translateX(0); z-index: 3; }
+    .slide.before { transform: translateX(-44px); }
+    .slide-head { display: flex; align-items: flex-start; }
+    .slide-head > div { width: 100%; min-width: 0; }
+    .kicker { margin: 0 0 8px; color: var(--blue); font: 700 11px/1.2 "SFMono-Regular", Consolas, monospace; text-transform: uppercase; }
+    h1, h2, h3, p { margin-top: 0; }
+    h1 { max-width: 820px; margin-bottom: 13px; font: 700 clamp(40px, 5.3vw, 74px)/.94 Georgia, "Songti SC", serif; }
+    h2 { margin-bottom: 0; font: 700 clamp(28px, 3.35vw, 48px)/1.02 Georgia, "Songti SC", serif; }
+    h3 { margin-bottom: 7px; font-size: clamp(13px, 1.2vw, 18px); line-height: 1.15; }
+    p { color: #3f433c; font-size: clamp(10px, .92vw, 14px); line-height: 1.5; }
+    .slide-no {
+      position: absolute;
+      top: clamp(20px, 2.4vw, 34px);
+      right: clamp(20px, 2.4vw, 34px);
+      min-width: 64px;
+      color: var(--muted);
+      font: 700 clamp(13px, 1.2vw, 18px)/1 "SFMono-Regular", Consolas, monospace;
+      text-align: right;
+      white-space: nowrap;
+    }
+    .slide-foot {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr);
+      align-items: center;
+      gap: clamp(10px, 1.3vw, 18px);
+      min-height: clamp(36px, 3.4vw, 46px);
+      margin-top: 2px;
+      padding: 8px 12px 8px 0;
+      border-top: 1px solid var(--ink);
+      color: var(--ink);
+      background: rgba(255, 254, 248, .72);
+      font: 700 clamp(9px, .8vw, 12px)/1.35 "SFMono-Regular", Consolas, monospace;
+    }
+    .slide-foot::before {
+      content: "KEY TAKEAWAY";
+      align-self: stretch;
+      display: grid;
+      place-items: center;
+      padding: 0 12px;
+      color: var(--ink);
+      background: var(--green);
+      font-size: clamp(7px, .65vw, 10px);
+      white-space: nowrap;
+    }
+    .slide-foot span { text-align: left; }
+    .lead { max-width: 720px; font-size: clamp(13px, 1.18vw, 18px); line-height: 1.5; }
+    .slide-summary {
+      max-width: 880px;
+      margin: 9px 0 0;
+      color: var(--muted);
+      font-size: clamp(9px, .86vw, 13px);
+      line-height: 1.45;
+    }
+    .cover-grid { display: grid; grid-template-columns: .85fr 1.15fr; align-items: end; gap: clamp(20px, 4vw, 64px); min-height: 0; }
+    .cover-copy { align-self: center; }
+    .tag-row { display: flex; flex-wrap: wrap; gap: 8px; }
+    .tag { border: 1px solid var(--ink); padding: 6px 9px; background: var(--white); font: 700 clamp(8px,.78vw,11px)/1 "SFMono-Regular", Consolas, monospace; }
+    .system-map { position: relative; height: 84%; min-height: 250px; border: 2px solid var(--ink); background: var(--white); }
+    .system-map::before, .system-map::after { content: ""; position: absolute; background: var(--ink); }
+    .system-map::before { width: 70%; height: 2px; left: 15%; top: 50%; }
+    .system-map::after { height: 70%; width: 2px; left: 50%; top: 15%; }
+    .map-core { position: absolute; inset: 35% 30%; display: grid; place-items: center; z-index: 2; background: var(--ink); color: var(--paper); font: 800 clamp(18px,2.6vw,38px)/1 Georgia, serif; }
+    .map-node { position: absolute; z-index: 3; width: 28%; min-height: 18%; padding: 10px; border: 1px solid var(--ink); background: var(--paper); font-size: clamp(8px,.86vw,13px); }
+    .map-node b { display: block; margin-bottom: 4px; font-family: "SFMono-Regular", Consolas, monospace; }
+    .map-node.n1 { left: 4%; top: 8%; border-top: 6px solid var(--blue); }
+    .map-node.n2 { right: 4%; top: 8%; border-top: 6px solid var(--red); }
+    .map-node.n3 { left: 4%; bottom: 8%; border-top: 6px solid var(--yellow); }
+    .map-node.n4 { right: 4%; bottom: 8%; border-top: 6px solid var(--green); }
+    .grid-2, .grid-3, .grid-4 { display: grid; min-height: 0; gap: clamp(10px, 1.5vw, 22px); }
+    .grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .grid-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    .panel { border-top: 5px solid var(--ink); padding: clamp(10px, 1.3vw, 18px) 0 0; min-width: 0; }
+    .panel.blue { border-color: var(--blue); } .panel.red { border-color: var(--red); }
+    .panel.green { border-color: var(--green); } .panel.yellow { border-color: var(--yellow); }
+    .panel p:last-child { margin-bottom: 0; }
+    .big-stat { margin: 2px 0 8px; font: 700 clamp(26px, 4vw, 58px)/1 Georgia, serif; }
+    .mono { font-family: "SFMono-Regular", Consolas, monospace; }
+    .small { font-size: clamp(9px,.82vw,12px); line-height: 1.45; }
+    .context-board { display: grid; grid-template-columns: 1fr 1.5fr 1fr; align-items: center; gap: clamp(12px, 2vw, 30px); }
+    .context-side { display: grid; gap: 10px; }
+    .context-box { border: 1px solid var(--ink); background: var(--white); padding: clamp(10px, 1.2vw, 17px); }
+    .context-box b { display: block; margin-bottom: 4px; }
+    .core-ring { aspect-ratio: 1; border: clamp(12px,1.7vw,24px) solid var(--ink); border-radius: 50%; display: grid; place-items: center; text-align: center; background: var(--green); }
+    .core-ring strong { display: block; font: 700 clamp(24px,4vw,60px)/1 Georgia, serif; }
+    .arrow-line { height: 2px; background: var(--ink); position: relative; }
+    .arrow-line::after { content: ""; position: absolute; right: -1px; top: -4px; border-left: 8px solid var(--ink); border-top: 5px solid transparent; border-bottom: 5px solid transparent; }
+    .principle { display: grid; grid-template-columns: 44px 1fr; gap: 12px; align-content: start; }
+    .principle-index { width: 42px; height: 42px; display: grid; place-items: center; color: var(--white); background: var(--ink); font: 700 13px/1 "SFMono-Regular", Consolas, monospace; }
+    .concept-layout { display: grid; grid-template-columns: .9fr 1.1fr; gap: clamp(18px, 3vw, 44px); min-height: 0; align-items: center; }
+    .compact-list { display: grid; gap: 5px; align-content: center; }
+    .compact-row { display: grid; grid-template-columns: 34px 104px 1fr; align-items: center; gap: 9px; min-width: 0; padding: 7px 0; border-bottom: 1px solid var(--line); }
+    .compact-row:last-child { border-bottom: 0; }
+    .compact-row i { display: grid; place-items: center; width: 28px; height: 28px; color: var(--paper); background: var(--ink); font: 700 8px/1 "SFMono-Regular", Consolas, monospace; font-style: normal; }
+    .compact-row b { font-size: clamp(10px, .92vw, 14px); }
+    .compact-row span { color: var(--muted); font-size: clamp(8px, .72vw, 11px); line-height: 1.35; }
+    .diagram-board { min-height: 0; padding-left: clamp(16px, 2.5vw, 34px); border-left: 1px solid var(--ink); }
+    .diagram-title { margin-bottom: 12px; color: var(--blue); font: 700 clamp(8px,.72vw,11px)/1 "SFMono-Regular",Consolas,monospace; }
+    .diagram-flow { display: grid; grid-template-columns: 1fr 24px 1fr 24px 1fr; align-items: center; gap: 0; }
+    .diagram-node { min-height: 88px; display: grid; align-content: center; gap: 5px; padding: 12px; border: 1px solid var(--ink); background: var(--white); }
+    .diagram-node strong { font-size: clamp(11px, 1vw, 15px); }
+    .diagram-node span { color: var(--muted); font-size: clamp(8px,.7vw,10px); line-height: 1.35; }
+    .diagram-node.accent { color: var(--paper); background: var(--ink); }
+    .diagram-node.accent span { color: #c8ccc2; }
+    .diagram-arrow { height: 1px; background: var(--ink); position: relative; }
+    .diagram-arrow::after { content: ""; position: absolute; right: 0; top: -3px; border-left: 6px solid var(--ink); border-top: 4px solid transparent; border-bottom: 4px solid transparent; }
+    .guardrail-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 10px; }
+    .guardrail { padding: 9px 10px; border-left: 4px solid var(--green); background: var(--white); font-size: clamp(8px,.7vw,10px); line-height: 1.35; }
+    .guardrail:nth-child(2) { border-color: var(--red); }
+    .memory-flow { display: grid; grid-template-columns: repeat(9, minmax(0, auto)); align-items: center; justify-content: center; gap: 0; }
+    .memory-node { width: clamp(118px, 12vw, 170px); min-height: 150px; display: grid; grid-template-rows: auto auto 1fr auto; padding: clamp(11px,1.2vw,17px); border: 1px solid var(--ink); border-top: 6px solid var(--blue); background: var(--white); }
+    .memory-node:nth-of-type(3) { border-top-color: var(--yellow); }
+    .memory-node:nth-of-type(5) { border-top-color: var(--green); }
+    .memory-node:nth-of-type(7) { border-top-color: var(--red); }
+    .memory-node:nth-of-type(9) { border-top-color: var(--ink); }
+    .memory-node span { color: var(--blue); font: 700 clamp(8px,.72vw,11px)/1 "SFMono-Regular",Consolas,monospace; }
+    .memory-node strong { margin: 10px 0 7px; font-size: clamp(12px,1.05vw,16px); }
+    .memory-node p { margin: 0; font-size: clamp(8px,.72vw,11px); line-height: 1.4; }
+    .memory-node small { align-self: end; margin-top: 8px; color: var(--muted); font: clamp(7px,.62vw,9px)/1.2 "SFMono-Regular",Consolas,monospace; }
+    .memory-note-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 12px; }
+    .memory-note { padding: 8px 10px; border-top: 3px solid var(--blue); background: rgba(255,254,248,.75); font-size: clamp(8px,.7vw,10px); line-height: 1.35; }
+    .memory-note:nth-child(2) { border-color: var(--red); }
+    .memory-note:nth-child(3) { border-color: var(--green); }
+    .type-layout { display: grid; grid-template-columns: 1.15fr .85fr; gap: clamp(18px,3vw,42px); min-height: 0; align-items: center; }
+    .type-matrix { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 8px; }
+    .type-item { padding: 10px 12px; border: 1px solid var(--ink); border-top: 5px solid var(--blue); background: var(--white); }
+    .type-item:nth-child(2) { border-top-color: var(--green); }
+    .type-item:nth-child(3) { border-top-color: var(--yellow); }
+    .type-item:nth-child(4) { border-top-color: var(--red); }
+    .type-item span { color: var(--muted); font: 700 clamp(7px,.64vw,9px)/1 "SFMono-Regular",Consolas,monospace; }
+    .type-item h3 { margin: 6px 0 5px; }
+    .type-item p { margin: 0; font-size: clamp(8px,.72vw,11px); line-height: 1.4; }
+    .governance-flow { display: grid; gap: 7px; }
+    .governance-node { display: grid; grid-template-columns: 86px 1fr; border: 1px solid var(--ink); background: var(--white); }
+    .governance-node b { display: grid; place-items: center; padding: 9px; color: var(--paper); background: var(--ink); font: 700 clamp(7px,.68vw,10px)/1.2 "SFMono-Regular",Consolas,monospace; }
+    .governance-node span { padding: 9px; font-size: clamp(8px,.72vw,11px); line-height: 1.35; }
+    .governance-link { width: 1px; height: 10px; margin-left: 42px; background: var(--ink); }
+    .stack { display: grid; grid-template-columns: .65fr 1.35fr; gap: clamp(18px, 3vw, 42px); }
+    .stack-list { display: grid; grid-template-rows: repeat(4, 1fr); gap: 7px; }
+    .stack-item { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px; border: 1px solid var(--ink); background: var(--white); font-size: clamp(9px,.9vw,13px); }
+    .stack-item span { font-family: "SFMono-Regular", Consolas, monospace; color: var(--muted); }
+    .module-map { display: grid; grid-template-rows: repeat(4, 1fr); gap: 7px; }
+    .module-row { display: grid; grid-template-columns: 1fr 2.7fr; gap: 7px; }
+    .module-label, .module-cells > div { border: 1px solid var(--ink); padding: 9px 11px; background: var(--white); font-size: clamp(8px,.78vw,12px); }
+    .module-label { display: grid; place-items: center; background: var(--ink); color: var(--paper); font-weight: 700; }
+    .module-cells { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; }
+    .code-architecture-slide .stack {
+      align-self: center;
+      width: min(1220px, 100%);
+      height: min(560px, 100%);
+      margin-inline: auto;
+      grid-template-columns: .72fr 1.28fr;
+      gap: clamp(12px, 1.5vw, 22px);
+    }
+    .code-architecture-slide .stack-list,
+    .code-architecture-slide .module-map,
+    .code-architecture-slide .module-row,
+    .code-architecture-slide .module-cells {
+      gap: 4px;
+    }
+    .code-architecture-slide .stack-item,
+    .code-architecture-slide .module-label,
+    .code-architecture-slide .module-cells > div {
+      border: 0;
+    }
+    .code-architecture-slide .stack-item,
+    .code-architecture-slide .module-cells > div {
+      background: rgba(255, 254, 248, .8);
+    }
+    .code-architecture-slide .module-cells > div {
+      display: grid;
+      place-items: center;
+      text-align: center;
+    }
+    .layers { display: grid; grid-template-columns: repeat(5, 1fr); align-items: stretch; gap: clamp(7px, 1vw, 14px); }
+    .layer { position: relative; padding: clamp(12px,1.5vw,22px); border: 1px solid var(--ink); background: var(--white); overflow: hidden; }
+    .layer::after { content: attr(data-layer); position: absolute; right: -3px; bottom: -12px; color: rgba(23,25,21,.08); font: 700 clamp(60px,8vw,120px)/1 Georgia, serif; }
+    .layer h3, .layer p { position: relative; z-index: 1; }
+    .layer .pulse { width: 12px; height: 12px; margin-bottom: 18px; border-radius: 50%; background: var(--green); box-shadow: 0 0 0 7px rgba(84,199,107,.2); }
+    .layer:nth-child(2) .pulse { background: var(--yellow); box-shadow: 0 0 0 7px rgba(242,200,75,.2); }
+    .layer:nth-child(3) .pulse { background: var(--blue); box-shadow: 0 0 0 7px rgba(40,100,220,.18); }
+    .layer:nth-child(4) .pulse { background: var(--red); box-shadow: 0 0 0 7px rgba(232,88,63,.18); }
+    .process-architecture {
+      display: grid;
+      grid-template-columns: 112px repeat(5, minmax(0, 1fr));
+      gap: 7px;
+      align-content: center;
+    }
+    .process-axis {
+      padding: 0 9px 5px;
+      color: var(--muted);
+      font: 700 clamp(7px,.66vw,10px)/1 "SFMono-Regular",Consolas,monospace;
+      text-transform: uppercase;
+    }
+    .process-axis:first-child { padding-left: 0; }
+    .process-lane {
+      display: grid;
+      align-content: center;
+      padding: 10px 11px;
+      color: var(--paper);
+      background: var(--ink);
+      border-left: 7px solid var(--blue);
+    }
+    .process-lane.write { border-color: var(--blue); }
+    .process-lane.read { border-color: var(--green); }
+    .process-lane.evolve { border-color: var(--red); }
+    .process-lane b { font: 700 clamp(10px,.9vw,13px)/1 "SFMono-Regular",Consolas,monospace; }
+    .process-lane span { margin-top: 5px; color: #bec2b8; font-size: clamp(7px,.65vw,9px); }
+    .process-node {
+      position: relative;
+      min-width: 0;
+      min-height: 72px;
+      display: grid;
+      align-content: center;
+      gap: 5px;
+      padding: 10px 12px;
+      border: 1px solid var(--ink);
+      background: var(--white);
+    }
+    .process-node::after {
+      content: "";
+      position: absolute;
+      z-index: 2;
+      top: 50%;
+      right: -8px;
+      width: 8px;
+      height: 1px;
+      background: var(--ink);
+    }
+    .process-node.end::after { display: none; }
+    .process-node b { font-size: clamp(10px,.86vw,13px); line-height: 1.15; }
+    .process-node span { color: var(--muted); font-size: clamp(7px,.66vw,10px); line-height: 1.3; }
+    .process-node.authority { border-top: 5px solid var(--yellow); }
+    .process-node.output { border-top: 5px solid var(--green); }
+    .process-feedback {
+      grid-column: 2 / -1;
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 7px;
+      margin-top: 3px;
+    }
+    .process-feedback div {
+      padding: 8px 10px;
+      border-top: 3px solid var(--blue);
+      background: rgba(255,254,248,.78);
+      font-size: clamp(7px,.68vw,10px);
+      line-height: 1.35;
+    }
+    .process-feedback div:nth-child(2) { border-color: var(--red); }
+    .process-feedback div:nth-child(3) { border-color: var(--green); }
+    .transform-flow {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: clamp(12px, 1.35vw, 20px);
+      align-items: stretch;
+    }
+    .transform-card {
+      position: relative;
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      padding: clamp(11px, 1vw, 15px);
+      border: 1px solid var(--ink);
+      border-top: 6px solid var(--blue);
+      background: var(--white);
+    }
+    .transform-card:nth-child(2) { border-top-color: var(--yellow); }
+    .transform-card:nth-child(3) { border-top-color: var(--red); }
+    .transform-card:nth-child(4) { border-top-color: var(--green); }
+    .transform-card:nth-child(5) { border-top-color: var(--ink); }
+    .transform-card::after {
+      content: "";
+      position: absolute;
+      top: 50%;
+      right: calc(clamp(12px, 1.35vw, 20px) * -1 - 1px);
+      width: clamp(12px, 1.35vw, 20px);
+      height: 1px;
+      background: var(--ink);
+    }
+    .transform-card:last-child::after { display: none; }
+    .transform-step {
+      color: var(--blue);
+      font: 700 clamp(7px,.66vw,10px)/1 "SFMono-Regular",Consolas,monospace;
+      text-transform: uppercase;
+    }
+    .transform-card h3 { margin: 8px 0 10px; }
+    .data-shape {
+      flex: 1;
+      margin: 0;
+      padding: 9px 10px;
+      color: #30342d;
+      background: rgba(23,25,21,.045);
+      font: clamp(7px,.66vw,10px)/1.5 "SFMono-Regular",Consolas,monospace;
+    }
+    .data-shape span { display: block; }
+    .data-shape b { color: var(--ink); }
+    .transform-op {
+      margin-top: 10px;
+      padding-top: 8px;
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+      font-size: clamp(7px,.66vw,10px);
+      line-height: 1.35;
+    }
+    .transform-op b {
+      display: block;
+      margin-bottom: 3px;
+      color: var(--red);
+      font: 700 clamp(7px,.64vw,9px)/1 "SFMono-Regular",Consolas,monospace;
+    }
+    .transform-rules {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 7px;
+    }
+    .transform-rule {
+      padding: 9px 11px;
+      border-left: 4px solid var(--blue);
+      background: rgba(255,254,248,.78);
+      font-size: clamp(7px,.68vw,10px);
+      line-height: 1.35;
+    }
+    .transform-rule:nth-child(2) { border-color: var(--red); }
+    .transform-rule:nth-child(3) { border-color: var(--green); }
+    .transform-rule b { display: block; margin-bottom: 3px; }
+    .flow-board { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; align-items: stretch; }
+    .flow { border: 1px solid var(--ink); background: var(--white); padding: clamp(12px,1.5vw,20px); display: flex; flex-direction: column; }
+    .flow-title { display: flex; justify-content: space-between; gap: 8px; align-items: center; border-bottom: 1px solid var(--line); padding-bottom: 8px; margin-bottom: 10px; }
+    .flow-title span { padding: 3px 6px; color: var(--white); background: var(--ink); font: 700 clamp(7px,.68vw,10px)/1 "SFMono-Regular",Consolas,monospace; }
+    .flow-step { display: grid; grid-template-columns: 24px 1fr; gap: 8px; align-items: start; margin: 5px 0; font-size: clamp(8px,.8vw,12px); }
+    .flow-step i { width: 21px; height: 21px; display: grid; place-items: center; border: 1px solid var(--ink); border-radius: 50%; font-style: normal; font: 700 8px/1 "SFMono-Regular",Consolas,monospace; }
+    .formula { padding: clamp(12px,1.8vw,24px); border: 2px solid var(--ink); background: var(--white); font: 700 clamp(15px,2vw,28px)/1.35 Georgia, serif; text-align: center; }
+    .pipeline { display: flex; align-items: center; gap: 0; min-width: 0; }
+    .pipe-node { flex: 1 1 0; min-width: 0; padding: 12px 8px; border: 1px solid var(--ink); background: var(--white); text-align: center; font-size: clamp(8px,.82vw,12px); }
+    .pipe-arrow { flex: 0 0 clamp(14px,1.6vw,24px); height: 2px; background: var(--ink); position: relative; }
+    .pipe-arrow::after { content: ""; position: absolute; right: 0; top: -3px; border-left: 6px solid var(--ink); border-top: 4px solid transparent; border-bottom: 4px solid transparent; }
+    .config-layout { display: grid; grid-template-columns: 1fr 1.3fr; gap: clamp(18px,3vw,48px); min-height: 0; }
+    .priority { display: grid; gap: 7px; align-content: center; }
+    .priority-row { position: relative; padding: 10px 14px; border: 1px solid var(--ink); background: var(--white); font: 700 clamp(9px,.9vw,13px)/1.2 "SFMono-Regular",Consolas,monospace; }
+    .priority-row:nth-child(1) { width: 100%; background: var(--green); }
+    .priority-row:nth-child(2) { width: 90%; }
+    .priority-row:nth-child(3) { width: 80%; }
+    .priority-row:nth-child(4) { width: 70%; }
+    .priority-row:nth-child(5) { width: 60%; color: var(--paper); background: var(--ink); }
+    .code-sheet { margin: 0; padding: clamp(14px,1.6vw,22px); overflow: hidden; background: var(--ink); color: #d9ddd3; border-left: 8px solid var(--green); font: clamp(8px,.83vw,12px)/1.6 "SFMono-Regular",Consolas,monospace; white-space: pre-wrap; }
+    .metric-table { display: grid; grid-template-columns: 1.25fr .75fr .75fr; border: 1px solid var(--ink); background: var(--white); }
+    .metric-table > div { padding: clamp(7px,.9vw,12px); border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); font-size: clamp(8px,.78vw,12px); }
+    .metric-table > div:nth-child(3n) { border-right: 0; }
+    .metric-table .th { color: var(--paper); background: var(--ink); font-weight: 700; }
+    .metric-table .ok { color: #166329; font-family: "SFMono-Regular",Consolas,monospace; }
+    .score-card { display: grid; align-content: center; border: 2px solid var(--ink); background: var(--green); padding: 20px; }
+    .score-card strong { font: 700 clamp(42px,7vw,100px)/.9 Georgia,serif; }
+    .truth-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+    .truth { display: grid; grid-template-columns: 80px 1fr; border: 1px solid var(--ink); background: var(--white); min-height: 0; }
+    .truth-status { display: grid; place-items: center; padding: 10px; color: var(--paper); background: var(--ink); font: 700 clamp(8px,.8vw,12px)/1.2 "SFMono-Regular",Consolas,monospace; text-align: center; }
+    .truth-status.warn { background: var(--red); } .truth-status.partial { background: var(--blue); }
+    .truth-copy { padding: 10px 13px; }
+    .truth-copy h3 { margin-bottom: 4px; }
+    .truth-copy p { margin-bottom: 0; }
+    .roadmap { display: grid; grid-template-columns: repeat(6, 1fr); gap: 7px; align-items: stretch; }
+    .road { position: relative; padding: 12px 10px; border: 1px solid var(--ink); background: var(--white); }
+    .road::before { content: ""; display: block; width: 12px; height: 12px; margin-bottom: 16px; border-radius: 50%; background: var(--blue); }
+    .road:nth-child(2)::before, .road:nth-child(3)::before { background: var(--red); }
+    .road:nth-child(4)::before { background: var(--yellow); }
+    .road:nth-child(5)::before, .road:nth-child(6)::before { background: var(--green); }
+    .road span { color: var(--muted); font: 700 clamp(7px,.65vw,10px)/1 "SFMono-Regular",Consolas,monospace; }
+    .artifact-list { display: grid; grid-template-columns: repeat(2,1fr); gap: 8px; }
+    .artifact { padding: 11px 13px; border-left: 5px solid var(--blue); background: var(--white); font: clamp(8px,.78vw,12px)/1.4 "SFMono-Regular",Consolas,monospace; }
+    .artifact:nth-child(2n) { border-color: var(--green); }
+    .arch-stack { display: grid; gap: 7px; align-content: center; min-height: 0; }
+    .arch-row { display: grid; grid-template-columns: 108px repeat(4, minmax(0, 1fr)); gap: 7px; }
+    .arch-label, .arch-box { border: 1px solid var(--ink); padding: clamp(7px,.9vw,12px); background: var(--white); font-size: clamp(8px,.78vw,12px); }
+    .arch-label { display: grid; place-items: center; color: var(--paper); background: var(--ink); font: 700 clamp(8px,.72vw,11px)/1.2 "SFMono-Regular",Consolas,monospace; }
+    .arch-box strong { display: block; margin-bottom: 3px; }
+    .arch-box.current { border-top: 5px solid var(--green); background: rgba(84,199,107,.08); }
+    .arch-box.target { border-top: 5px dashed var(--red); background: rgba(232,88,63,.07); }
+    .classification { display: grid; grid-template-columns: 120px repeat(4, minmax(0,1fr)); border: 1px solid var(--ink); background: var(--white); }
+    .classification > div { min-width: 0; padding: clamp(6px,.8vw,11px); border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); font-size: clamp(7px,.74vw,11px); }
+    .classification > div:nth-child(5n) { border-right: 0; }
+    .classification .axis, .classification .head { color: var(--paper); background: var(--ink); font-weight: 700; }
+    .classification .episodic { background: rgba(40,100,220,.10); }
+    .classification .semantic { background: rgba(84,199,107,.12); }
+    .classification .preference { background: rgba(242,200,75,.20); }
+    .classification .procedural { background: rgba(232,88,63,.11); }
+    .classification-mobile { display: none; }
+    .type-card { position: relative; min-height: 0; padding: clamp(12px,1.4vw,20px); border: 1px solid var(--ink); background: var(--white); }
+    .type-card::before { content: attr(data-type); display: block; margin-bottom: 12px; color: var(--blue); font: 700 clamp(8px,.72vw,11px)/1 "SFMono-Regular",Consolas,monospace; }
+    .type-card ul { margin: 0; padding-left: 16px; color: #3f433c; font-size: clamp(8px,.76vw,11px); line-height: 1.55; }
+    .type-card li + li { margin-top: 4px; }
+    .seven { display: grid; grid-template-columns: repeat(7, minmax(0,1fr)); align-items: stretch; gap: 5px; }
+    .seven-step { position: relative; padding: clamp(8px,.9vw,12px); border: 1px solid var(--ink); background: var(--white); font-size: clamp(7px,.68vw,10px); }
+    .seven-step b { display: block; margin-bottom: 6px; font-size: clamp(9px,.86vw,13px); }
+    .seven-step span { display: block; margin-bottom: 9px; color: var(--blue); font: 700 clamp(8px,.7vw,11px)/1 "SFMono-Regular",Consolas,monospace; }
+    .seven-step.target { border-top: 6px solid var(--red); }
+    .target-layout { display: grid; grid-template-rows: minmax(0, 1fr) auto; gap: clamp(8px, 1vw, 14px); min-height: 0; }
+    .target-pipeline { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: clamp(7px, .8vw, 12px); min-height: 0; }
+    .target-step {
+      position: relative;
+      display: grid;
+      grid-template-rows: auto auto 1fr auto;
+      min-width: 0;
+      padding: clamp(10px, 1.15vw, 16px);
+      border: 1px solid var(--ink);
+      border-top: 6px solid var(--red);
+      background: var(--white);
+    }
+    .target-step:nth-child(1), .target-step:nth-child(2) { border-top-color: var(--blue); }
+    .target-step:nth-child(4), .target-step:nth-child(5) { border-top-color: var(--yellow); }
+    .target-step:nth-child(6), .target-step:nth-child(7), .target-step:nth-child(8) { border-top-color: var(--green); }
+    .target-step span { color: var(--blue); font: 700 clamp(8px,.72vw,11px)/1 "SFMono-Regular",Consolas,monospace; }
+    .target-step strong { margin: 8px 0 6px; font-size: clamp(12px,1.08vw,16px); line-height: 1.1; }
+    .target-step p { margin: 0; font-size: clamp(8px,.72vw,11px); line-height: 1.4; }
+    .target-step small { align-self: end; margin-top: 8px; padding-top: 7px; border-top: 1px solid var(--line); color: var(--muted); font: clamp(7px,.62vw,9px)/1.35 "SFMono-Regular",Consolas,monospace; }
+    .target-controls { display: grid; grid-template-columns: 1.15fr 1fr 1fr; gap: clamp(7px, .8vw, 12px); }
+    .target-control { padding: 9px 12px; color: var(--paper); background: var(--ink); font-size: clamp(8px,.72vw,11px); line-height: 1.4; }
+    .target-control b { display: block; margin-bottom: 3px; color: var(--green); font-family: "SFMono-Regular",Consolas,monospace; }
+    .state-grid { display: grid; grid-template-columns: 1fr 1fr; gap: clamp(12px,2vw,28px); min-height: 0; }
+    .state-track { display: grid; gap: 7px; align-content: center; }
+    .state-node { display: grid; grid-template-columns: 110px 1fr; border: 1px solid var(--ink); background: var(--white); }
+    .state-node b { padding: 9px; color: var(--paper); background: var(--ink); font: 700 clamp(8px,.74vw,11px)/1.2 "SFMono-Regular",Consolas,monospace; }
+    .state-node span { padding: 9px; font-size: clamp(8px,.75vw,11px); }
+    .state-node.red b { background: var(--red); }
+    .state-node.blue b { background: var(--blue); }
+    .schema-grid { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 9px; min-height: 0; }
+    .example-grid-4 { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 9px; min-height: 0; }
+    .schema-card { min-width: 0; overflow: hidden; border: 1px solid var(--ink); background: var(--white); }
+    .schema-card h3 { margin: 0; padding: 8px 11px; color: var(--paper); background: var(--ink); font: 700 clamp(9px,.84vw,13px)/1.2 "SFMono-Regular",Consolas,monospace; }
+    .schema-card pre { margin: 0; padding: clamp(9px,1vw,14px); color: #33372f; font: clamp(7px,.66vw,10px)/1.48 "SFMono-Regular",Consolas,monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .schema-card.blue h3 { background: var(--blue); }
+    .schema-card.red h3 { background: var(--red); }
+    .schema-card.green h3 { color: var(--ink); background: var(--green); }
+    .split-label { display: inline-block; margin-bottom: 8px; padding: 4px 7px; color: var(--paper); background: var(--ink); font: 700 clamp(7px,.68vw,10px)/1 "SFMono-Regular",Consolas,monospace; }
+    .formula-list { display: grid; gap: 8px; }
+    .formula-row { display: grid; grid-template-columns: 70px 1fr; border: 1px solid var(--ink); background: var(--white); }
+    .formula-row b { display: grid; place-items: center; color: var(--paper); background: var(--blue); font: 700 clamp(9px,.9vw,14px)/1 "SFMono-Regular",Consolas,monospace; }
+    .formula-row code { padding: 10px 12px; font: clamp(8px,.76vw,11px)/1.4 "SFMono-Regular",Consolas,monospace; white-space: normal; }
+    .closing { display: grid; grid-template-columns: 1.15fr .85fr; gap: clamp(20px,4vw,70px); align-items: center; }
+    .stamp { aspect-ratio: 1; border: 3px solid var(--red); border-radius: 50%; display: grid; place-items: center; transform: rotate(-7deg); color: var(--red); text-align: center; font: 800 clamp(20px,3vw,42px)/1 Georgia,serif; }
+    .nav-dock {
+      position: fixed;
+      z-index: 50;
+      left: 50%;
+      bottom: 0;
+      width: min(760px, calc(100vw - 24px));
+      height: 34px;
+      transform: translateX(-50%);
+    }
+    .nav-dock::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+    }
+    .toolbar {
+      position: absolute;
+      left: 50%;
+      bottom: 12px;
+      justify-content: center;
+      max-width: calc(100vw - 24px);
+      min-height: 48px;
+      padding: 7px 10px;
+      border: 1px solid #474c44;
+      border-radius: 8px;
+      box-shadow: 0 16px 48px rgba(23, 25, 21, .28);
+      opacity: 0;
+      pointer-events: none;
+      transform: translate(-50%, calc(100% + 24px));
+      transition:
+        opacity .72s ease 1.2s,
+        transform .86s cubic-bezier(.2,.8,.2,1) 1.2s;
+      will-change: opacity, transform;
+    }
+    .nav-dock:hover .toolbar,
+    .nav-dock:focus-within .toolbar {
+      opacity: 1;
+      pointer-events: auto;
+      transform: translate(-50%, 0);
+      transition-delay: 0s;
+      transition-duration: .2s, .32s;
+    }
+    .icon-btn { width: 34px; height: 34px; display: grid; place-items: center; border: 1px solid #555b50; color: var(--paper); background: transparent; cursor: pointer; transition: background .18s, color .18s, border-color .18s; }
+    .icon-btn:hover, .icon-btn:focus-visible { color: var(--ink); background: var(--green); border-color: var(--green); outline: 0; }
+    .icon-btn:disabled { opacity: .3; cursor: default; }
+    .dots { display: flex; align-items: center; gap: 6px; margin: 0 10px; }
+    .dot { width: 7px; height: 7px; padding: 0; border: 0; border-radius: 50%; background: #62675d; cursor: pointer; }
+    .dot.active { width: 22px; border-radius: 0; background: var(--green); }
+    .counter { min-width: 54px; text-align: center; color: #b7bbb0; font: 700 11px/1 "SFMono-Regular",Consolas,monospace; }
+    .progress { position: absolute; z-index: 30; left: 0; bottom: 0; height: 4px; background: var(--green); transition: width .3s ease; }
+    .accent-bar { display: grid; grid-template-columns: 2.4fr 1fr .7fr .45fr; height: 9px; margin-top: 12px; }
+    .accent-bar i:nth-child(1) { background: var(--ink); }.accent-bar i:nth-child(2) { background: var(--blue); }
+    .accent-bar i:nth-child(3) { background: var(--red); }.accent-bar i:nth-child(4) { background: var(--green); }
+    @media (max-width: 700px) {
+      .app { grid-template-rows: 38px minmax(0, 1fr); min-height: 420px; }
+      .topbar { padding: 0 12px; } .top-meta { display: none; }
+      .stage { padding: 0 0 8px; }
+      .deck {
+        width: 100%;
+        height: 100%;
+        aspect-ratio: auto;
+      }
+      .slide {
+        padding: 20px 20px 64px;
+        gap: 12px;
+        grid-template-rows: auto minmax(0, 1fr) auto;
+        align-content: normal;
+        overflow-x: hidden;
+        overflow-y: auto;
+        overscroll-behavior: contain;
+      }
+      .slide-head { padding-right: 34px; }
+      .slide-no { top: 20px; right: 12px; min-width: 54px; font-size: 11px; }
+      .slide-foot { min-height: 34px; padding: 6px 8px 6px 0; font-size: 9px; }
+      .slide-foot::before { padding: 0 8px; font-size: 7px; }
+      h1 { font-size: clamp(30px, 10vw, 52px); }
+      h2 { font-size: clamp(21px, 6vw, 34px); }
+      h3 { font-size: 15px; }
+      p, .lead { font-size: 12px; }
+      .small { font-size: 10px; }
+      .cover-grid, .grid-2, .grid-3, .context-board, .stack, .config-layout, .closing, .state-grid { grid-template-columns: 1fr; }
+      .concept-layout, .type-layout { grid-template-columns: 1fr; }
+      .diagram-board { padding: 12px 0 0; border-left: 0; border-top: 1px solid var(--ink); }
+      .diagram-flow { grid-template-columns: 1fr; gap: 6px; }
+      .diagram-arrow { width: 1px; height: 12px; justify-self: center; }
+      .diagram-arrow::after { right: -3px; top: 7px; transform: rotate(90deg); }
+      .compact-row { grid-template-columns: 30px 92px 1fr; }
+      .memory-flow { grid-template-columns: 1fr; gap: 6px; }
+      .memory-node { width: 100%; min-height: 118px; }
+      .memory-flow > .diagram-arrow { display: block; }
+      .memory-note-row, .type-matrix { grid-template-columns: 1fr; }
+      .grid-4, .roadmap { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .truth-grid, .artifact-list { grid-template-columns: 1fr; }
+      .cover-grid { gap: 18px; }
+      .system-map { min-height: 330px; }
+      .core-ring { width: 190px; justify-self: center; }
+      .tag { padding: 5px 7px; font-size: 8px; }
+      .grid-3, .grid-4 { gap: 10px; }
+      .panel { padding-top: 6px; }
+      .principle { grid-template-columns: 34px 1fr; gap: 9px; }
+      .principle-index { width: 32px; height: 32px; font-size: 9px; }
+      .module-row { grid-template-columns: 74px minmax(0, 1fr); }
+      .module-cells { grid-template-columns: 1fr; }
+      .code-architecture-slide .stack {
+        width: 100%;
+        height: auto;
+        grid-template-columns: 1fr;
+        gap: 12px;
+      }
+      .arch-row { grid-template-columns: 72px 1fr; }
+      .arch-row .arch-box { grid-column: 2; }
+      .classification { display: none; }
+      .classification-mobile { display: grid; gap: 8px; }
+      .seven { grid-template-columns: 1fr; gap: 8px; }
+      .target-layout { display: block; }
+      .target-pipeline, .target-controls { grid-template-columns: 1fr; }
+      .target-step { min-height: 0; }
+      .target-controls { margin-top: 10px; }
+      .state-node { grid-template-columns: 90px 1fr; }
+      .schema-grid, .example-grid-4 {
+        grid-template-columns: 1fr;
+        grid-auto-rows: max-content;
+        align-content: start;
+      }
+      .layers, .flow-board { grid-template-columns: 1fr; gap: 10px; }
+      .layer { padding: 14px; min-height: 150px; }
+      .layer .pulse { width: 9px; height: 9px; margin-bottom: 12px; box-shadow: none !important; }
+      .process-architecture { grid-template-columns: 1fr; gap: 6px; }
+      .process-architecture-slide {
+        grid-template-rows: auto auto auto;
+        align-content: start;
+      }
+      .process-axis { display: none; }
+      .process-lane { margin-top: 6px; padding: 9px 10px; }
+      .process-node { min-height: 52px; padding: 9px 10px 9px 16px; }
+      .process-node::after {
+        top: auto;
+        right: auto;
+        bottom: -7px;
+        left: 50%;
+        width: 1px;
+        height: 7px;
+      }
+      .process-feedback { grid-column: auto; grid-template-columns: 1fr; }
+      .data-transform-slide {
+        display: block;
+      }
+      .data-transform-slide .transform-flow,
+      .data-transform-slide .schema-grid,
+      .data-transform-slide .example-grid-4,
+      .data-transform-slide .transform-rules,
+      .data-transform-slide .slide-foot { margin-top: 12px; }
+      .eval-expansion-slide { display: block; }
+      .eval-expansion-slide .example-grid-4,
+      .eval-expansion-slide .slide-foot { margin-top: 12px; }
+      .transform-flow { grid-template-columns: 1fr; gap: 10px; }
+      .transform-card { min-height: 0; }
+      .transform-card::after {
+        top: auto;
+        right: auto;
+        bottom: -11px;
+        left: 50%;
+        width: 1px;
+        height: 10px;
+      }
+      .data-shape { flex: none; font-size: 9px; }
+      .transform-op { font-size: 9px; }
+      .transform-rules { grid-template-columns: 1fr; }
+      .transform-rule { font-size: 9px; }
+      .flow { padding: 12px; }
+      .flow-step { grid-template-columns: 22px 1fr; gap: 7px; margin: 4px 0; }
+      .flow-step i { width: 20px; height: 20px; font-size: 7px; }
+      .pipeline { flex-wrap: wrap; row-gap: 8px; }
+      .pipe-node { flex-basis: calc(50% - 14px); }
+      .truth { grid-template-columns: 58px 1fr; }
+      .truth-copy { padding: 8px; }
+      .roadmap { gap: 8px; }
+      .road { padding: 10px 8px; }
+      .road::before { width: 9px; height: 9px; margin-bottom: 10px; }
+      .metric-table { grid-template-columns: 1.2fr .7fr .8fr; }
+      .code-sheet { font-size: 9px; }
+      .stamp { width: 210px; justify-self: center; }
+      .nav-dock { width: calc(100vw - 16px); height: 28px; }
+      .toolbar {
+        bottom: 8px;
+        min-height: 44px;
+        padding: 6px 8px;
+        opacity: 1;
+        pointer-events: auto;
+        transform: translate(-50%, 0);
+        transition: none;
+      }
+      .icon-btn { width: 30px; height: 30px; }
+      .dots { display: none; }
+    }
+    @media (hover: none), (pointer: coarse) {
+      .toolbar {
+        opacity: 1;
+        pointer-events: auto;
+        transform: translate(-50%, 0);
+        transition: none;
+      }
+    }
+    @media (prefers-reduced-motion: reduce) { .slide, .progress { transition: none; } }
+    @media print {
+      body { overflow: visible; background: white; }
+      .app { display: block; height: auto; } .topbar, .nav-dock { display: none; }
+      .stage { display: block; padding: 0; overflow: visible; }
+      .deck { width: 100%; aspect-ratio: auto; box-shadow: none; overflow: visible; }
+      .slide { position: relative; width: 100%; aspect-ratio: 16/9; opacity: 1; visibility: visible; transform: none; page-break-after: always; }
+    }
+  </style>
+</head>
+<body>
+  <main class="app">
+    <header class="topbar">
+      <div class="brand"><span class="brand-mark"></span><span class="brand-name">MemX Systems Brief</span></div>
+      <div class="top-meta">ARCHITECTURE / CLASSIFICATION / CONSOLIDATION / RETRIEVAL / DATA / EVALS</div>
+    </header>
+    <section class="stage" aria-label="MemX 架构演示">
+      <div class="deck" id="deck">
+        <div class="progress" id="progress"></div>
+
+        <article class="slide active">
+          <div class="slide-head"><div><p class="kicker">Architecture briefing · 2026</p></div><span class="slide-no">01</span></div>
+          <div class="cover-grid">
+            <div class="cover-copy">
+              <h1>MemX<br>记忆系统</h1>
+              <p class="lead">从短期对话到长期事实：分层记忆、确定性召回、可治理演化，以及一套能阻止质量回归的评测系统。</p>
+              <div class="tag-row"><span class="tag">L0—L4</span><span class="tag">PORT / ADAPTER</span><span class="tag">ZERO-LLM RECALL</span><span class="tag">EVAL GATES</span></div>
+              <div class="accent-bar"><i></i><i></i><i></i><i></i></div>
+            </div>
+            <div class="system-map" aria-label="系统概览图">
+              <div class="map-core">MEMX</div>
+              <div class="map-node n1"><b>WRITE</b>observe → L0/L1 → L2</div>
+              <div class="map-node n2"><b>READ</b>facts + episodes + graph</div>
+              <div class="map-node n3"><b>EVOLVE</b>inbox → L3/L4 → forget</div>
+              <div class="map-node n4"><b>VERIFY</b>dataset → metrics → gates</div>
+            </div>
+          </div>
+          <div class="slide-foot"><span>目标：正确、可追溯、可替换、可评测</span></div>
+        </article>
+
+        <article class="slide">
+          <div class="slide-head"><div><p class="kicker">01 · System context</p><h2>它在系统里负责什么</h2></div><span class="slide-no">02</span></div>
+          <div class="context-board">
+            <div class="context-side">
+              <div class="context-box"><b>Agent Application</b><span class="small">生成回答、工具调用、业务流程</span></div>
+              <div class="arrow-line"></div>
+              <div class="context-box"><b>CLI / HTTP / Worker</b><span class="small">接入、调试、运维、后台维护</span></div>
+            </div>
+            <div class="core-ring"><div><strong>MEMX</strong><span class="mono small">evidence → fact → insight</span></div></div>
+            <div class="context-side">
+              <div class="context-box"><b>Redis</b><span class="small">L0 / inbox</span></div>
+              <div class="context-box"><b>PostgreSQL + pgvector</b><span class="small">L2 / L3</span></div>
+              <div class="context-box"><b>Neo4j + LLM Gateway</b><span class="small">L4 / model capability</span></div>
+            </div>
+          </div>
+          <div class="slide-foot"><span>MemX 提供上下文，不负责生成最终回答</span></div>
+        </article>
+
+        <article class="slide">
+          <div class="slide-head"><div><p class="kicker">02 · Full architecture</p><h2>从入口到存储的完整组件图</h2><p class="slide-summary">每一层只依赖稳定契约：入口负责编排，领域层负责语义，Port 隔离基础设施；虚线能力尚未成为生产权威路径。</p></div><span class="slide-no">03</span></div>
+          <div class="arch-stack">
+            <div class="arch-row"><div class="arch-label">ENTRY</div><div class="arch-box current"><strong>HumanMem SDK</strong>稳定应用入口</div><div class="arch-box current"><strong>mem CLI</strong>操作与诊断</div><div class="arch-box current"><strong>FastAPI</strong>HTTP 契约</div><div class="arch-box current"><strong>Eval Runner</strong>离线质量门禁</div></div>
+            <div class="arch-row"><div class="arch-label">ORCHESTRATE</div><div class="arch-box current"><strong>AgentMemory</strong>L0-L4 门面</div><div class="arch-box current"><strong>RecallAgent</strong>在线召回</div><div class="arch-box current"><strong>ConsolidationAgent</strong>异步固化</div><div class="arch-box current"><strong>Scheduler</strong>consolidate / forget</div></div>
+            <div class="arch-row"><div class="arch-label">DOMAIN</div><div class="arch-box current"><strong>Ingest</strong>buffer / working / inbox</div><div class="arch-box current"><strong>Retrieval</strong>candidate / RRF / F2</div><div class="arch-box current"><strong>Governance</strong>version / conflict / forget</div><div class="arch-box current"><strong>Graph</strong>insight / relation / audit</div></div>
+            <div class="arch-row"><div class="arch-label">PORTS</div><div class="arch-box current"><strong>L0 / L1</strong>short-term contracts</div><div class="arch-box current"><strong>L2 / L3</strong>evidence + fact contracts</div><div class="arch-box current"><strong>L4 / Inbox</strong>graph + queue contracts</div><div class="arch-box current"><strong>Snapshot / LLM</strong>persistence + model contracts</div></div>
+            <div class="arch-row"><div class="arch-label">ADAPTERS</div><div class="arch-box current"><strong>Memory</strong>deterministic local</div><div class="arch-box target"><strong>Redis</strong>L0 / queue authority</div><div class="arch-box target"><strong>PG + Neo4j</strong>remote authority</div><div class="arch-box target"><strong>LLM Gateway</strong>decision / embedding</div></div>
+          </div>
+          <div class="slide-foot"><span>绿色实线：当前主链路 · 红色虚线：目标生产能力</span></div>
+        </article>
+
+        <article class="slide process-architecture-slide">
+          <div class="slide-head"><div><p class="kicker">02A · Process architecture</p><h2>三条运行链路，共享同一证据底座</h2><p class="slide-summary">在线写入负责快速落证据，在线读取保持有界延迟，异步演化负责事实治理与图谱投影；三条链路通过 L2 evidence 和访问反馈形成闭环。</p></div><span class="slide-no">04</span></div>
+          <div class="process-architecture" aria-label="MemX 流程架构图">
+            <div class="process-axis">FLOW</div><div class="process-axis">入口</div><div class="process-axis">服务编排</div><div class="process-axis">领域处理</div><div class="process-axis">权威数据</div><div class="process-axis">结果</div>
+
+            <div class="process-lane write"><b>WRITE</b><span>ONLINE</span></div>
+            <div class="process-node"><b>observe / memorize</b><span>HumanMem · API · CLI</span></div>
+            <div class="process-node"><b>AgentMemory</b><span>identity · policy · persist</span></div>
+            <div class="process-node"><b>L0 → L1</b><span>append · compress · close slot</span></div>
+            <div class="process-node authority"><b>L2 Evidence</b><span>promote · dedupe · enqueue</span></div>
+            <div class="process-node output end"><b>Inbox</b><span>异步任务已就绪</span></div>
+
+            <div class="process-lane read"><b>READ</b><span>BOUNDED</span></div>
+            <div class="process-node"><b>recall query</b><span>query · k · entities</span></div>
+            <div class="process-node"><b>RecallAgent</b><span>route · budget · fallback</span></div>
+            <div class="process-node"><b>Hybrid retrieval</b><span>dense + sparse → RRF → F2</span></div>
+            <div class="process-node authority"><b>L2 + L3 + L4</b><span>evidence · facts · graph</span></div>
+            <div class="process-node output end"><b>Context</b><span>episodes · facts · subgraph</span></div>
+
+            <div class="process-lane evolve"><b>EVOLVE</b><span>ASYNC</span></div>
+            <div class="process-node"><b>worker claim</b><span>scheduler · maintenance</span></div>
+            <div class="process-node"><b>ConsolidationAgent</b><span>batch · retry · audit</span></div>
+            <div class="process-node"><b>classify + F5</b><span>extract · conflict · govern</span></div>
+            <div class="process-node authority"><b>L3 + Outbox</b><span>fact version · graph event</span></div>
+            <div class="process-node output end"><b>L4 Graph</b><span>insight · entity · relation</span></div>
+
+            <div class="process-feedback">
+              <div><b>证据不变式</b><br>L3 / L4 始终引用 L2 evidence_ids。</div>
+              <div><b>提交边界</b><br>目标由 fact、conflict、outbox 与 inbox done 共同提交。</div>
+              <div><b>反馈回路</b><br>召回命中强化 stability；维护任务执行遗忘与图谱审计。</div>
+            </div>
+          </div>
+          <div class="slide-foot"><span>一份证据底座，支撑快速写入、确定性读取和可恢复演化</span></div>
+        </article>
+
+        <article class="slide data-transform-slide">
+          <div class="slide-head"><div><p class="kicker">02B · Write transformation</p><h2>写入：消息如何变成长期证据</h2><p class="slide-summary">每次转换都补充结构与身份：原始调用先成为可追踪消息，压缩产生工作记忆，显式记忆或闭合 slot 再生成稳定 L2 evidence，最后以同一 mem_id 投递固化任务。</p></div><span class="slide-no">05</span></div>
+          <div class="transform-flow" aria-label="写入数据转换流程">
+            <section class="transform-card">
+              <span class="transform-step">01 · INPUT</span><h3>ObserveCall</h3>
+              <div class="data-shape"><span><b>session_id</b>: str</span><span><b>message</b>: {role, content}</span><span><b>scope_id</b>: project</span></div>
+              <div class="transform-op"><b>TO L0</b>校验非空内容，统一 identity，估算 token_len，分配 turn_id 与时间戳。</div>
+            </section>
+            <section class="transform-card">
+              <span class="transform-step">02 · RAW</span><h3>Message · L0</h3>
+              <div class="data-shape"><span>turn_id · role · content</span><span>ts · token_len</span><span>scope_id · session_id</span><span>source_id = scope/session/turn</span></div>
+              <div class="transform-op"><b>TO L1</b>达到 token/轮次阈值后 flush；压缩文本，抽取实体与 open slot。</div>
+            </section>
+            <section class="transform-card">
+              <span class="transform-step">03 · WORKING</span><h3>WorkingMemory · L1</h3>
+              <div class="data-shape"><span>rolling_summary</span><span>open_slots[] · entities[]</span><span>token_used · last_compress_ts</span><span>closed slot 保留 source_ids</span></div>
+              <div class="transform-op"><b>TO L2</b>closed slot 或显式“记住”文本经过 F1 importance、类型识别和 embedding。</div>
+            </section>
+            <section class="transform-card">
+              <span class="transform-step">04 · EVIDENCE</span><h3>EpisodicMemory · L2</h3>
+              <div class="data-shape"><span>mem_id · text · embedding</span><span>importance · mem_type</span><span>source_ids[] · status</span><span>access_count · stability</span></div>
+              <div class="transform-op"><b>TO INBOX</b>mem_id = hash(scope + normalized text)；重复内容合并来源和重要性。</div>
+            </section>
+            <section class="transform-card">
+              <span class="transform-step">05 · QUEUED</span><h3>InboxItem</h3>
+              <div class="data-shape"><span>item_id · scope_id · mem_id</span><span>text · priority · ts_enqueue</span><span>mem_type_hint</span><span>status=pending · retry_count=0</span></div>
+              <div class="transform-op"><b>RETURN</b>返回 promoted、mem_id、compress_triggered、inbox_pending 与存储状态。</div>
+            </section>
+          </div>
+          <div class="transform-rules">
+            <div class="transform-rule"><b>显式路径</b>“记住 / remember”可从 Message 直接经 F1 进入 L2，不等待压缩。</div>
+            <div class="transform-rule"><b>压缩路径</b>L0 窗口 → L1 slot；只有 closed slot 才晋升，open slot 继续保留。</div>
+            <div class="transform-rule"><b>幂等路径</b>L2 mem_id 与 Inbox item_id 都由 scope + 内容身份派生，重复写不会重复建证据。</div>
+          </div>
+          <div class="slide-foot"><span>结构逐步增加，原始来源始终通过 source_ids 保留下来</span></div>
+        </article>
+
+        <article class="slide data-transform-slide">
+          <div class="slide-head"><div><p class="kicker">02C · Read transformation</p><h2>读取：查询如何变成可注入上下文</h2><p class="slide-summary">查询先被规范化为有界检索计划，再并行生成情景、事实和图谱候选；只有 L2 情景候选参与 dense/sparse 融合与 F2 重排，最后与 L3/L4 结果组装。</p></div><span class="slide-no">06</span></div>
+          <div class="transform-flow" aria-label="读取数据转换流程">
+            <section class="transform-card">
+              <span class="transform-step">01 · INPUT</span><h3>RecallCall</h3>
+              <div class="data-shape"><span><b>session_id</b>: str</span><span><b>query</b>: str</span><span><b>k</b>: bounded int</span><span><b>entities</b>: list[str]?</span></div>
+              <div class="transform-op"><b>TO PLAN</b>解析 scope，限制 k，决定 preference、episode、graph 三类读取路由。</div>
+            </section>
+            <section class="transform-card">
+              <span class="transform-step">02 · FEATURES</span><h3>SearchRequest + Plan</h3>
+              <div class="data-shape"><span>query_tokens · query_embedding</span><span>k · include_archived · now_ts</span><span>routes[] · include_preferences</span><span>candidate hard limit</span></div>
+              <div class="transform-op"><b>TO ROUTES</b>倒排索引收敛候选；无 sparse 命中时使用有界热点候选兜底。</div>
+            </section>
+            <section class="transform-card">
+              <span class="transform-step">03 · CANDIDATES</span><h3>RouteResult[]</h3>
+              <div class="data-shape"><span>L2 dense: cosine score</span><span>L2 sparse: token overlap</span><span>L3: preference + semantic</span><span>L4: entity subgraph / graph query</span></div>
+              <div class="transform-op"><b>TO FUSION</b>L2 路由按 mem_id 做 RRF；无相关度且无关键词重叠的记录被过滤。</div>
+            </section>
+            <section class="transform-card">
+              <span class="transform-step">04 · RANKED</span><h3>FusedCandidate</h3>
+              <div class="data-shape"><span>memory · rrf_score</span><span>route_hits[] · route_scores</span><span>F2 relevance/recency/importance</span><span>rerank_score · top-k</span></div>
+              <div class="transform-op"><b>TO RESULT</b>命中 L2 执行 reinforce：更新 access_count、last_access、stability，并可复活 archived。</div>
+            </section>
+            <section class="transform-card">
+              <span class="transform-step">05 · OUTPUT</span><h3>RecallResult</h3>
+              <div class="data-shape"><span>facts: SemanticFact[]</span><span>episodes: EpisodicMemory[]</span><span>subgraph: {nodes, edges}</span><span>reinforced[] · plan</span></div>
+              <div class="transform-op"><b>TO AGENT</b>序列化为 facts / episodes / subgraph；上层 Agent 决定如何注入提示词。</div>
+            </section>
+          </div>
+          <div class="transform-rules">
+            <div class="transform-rule"><b>并行读取</b>L3 preference、L3 relevant facts 与 L4 graph 不等待 L2 排名完成。</div>
+            <div class="transform-rule"><b>严格边界</b>L4 不参与 L2 的同一 RRF；RecallPlan 是解释结构，不是通用 DAG。</div>
+            <div class="transform-rule"><b>失败降级</b>单路失败保留健康路由；reranker 失败退回 combined + RRF，graph 失败返回空子图。</div>
+          </div>
+          <div class="slide-foot"><span>查询 → 特征 → 候选 → 排名 → 上下文，在线路径默认零远程 LLM</span></div>
+        </article>
+
+        <article class="slide data-transform-slide">
+          <div class="slide-head"><div><p class="kicker">02D · Consolidation transformation</p><h2>固化：证据如何变成版本化事实与图谱</h2><p class="slide-summary">当前实现由确定性规则抽取事实候选，F5 负责所有同 key 异值的仲裁；高价值证据再派生图谱节点。LLM Gateway 尚未接入此主链路。</p></div><span class="slide-no">07</span></div>
+          <div class="transform-flow" aria-label="固化数据转换流程">
+            <section class="transform-card">
+              <span class="transform-step">01 · CLAIM</span><h3>InboxItem</h3>
+              <div class="data-shape"><span>item_id · mem_id · scope_id</span><span>text · priority · mem_type_hint</span><span>status=pending</span><span>retry_count · last_error</span></div>
+              <div class="transform-op"><b>TO EVIDENCE</b>按 priority、enqueue time、item_id 拉取；状态进入 processing。</div>
+            </section>
+            <section class="transform-card">
+              <span class="transform-step">02 · JOIN</span><h3>Evidence Bundle</h3>
+              <div class="data-shape"><span>EpisodicMemory.text</span><span>importance · access_count</span><span>source_ids[] · mem_type</span><span>existing facts / graph context</span></div>
+              <div class="transform-op"><b>TO SPEC</b>当前通过 key=value、语言偏好和流程关键词规则识别候选。</div>
+            </section>
+            <section class="transform-card">
+              <span class="transform-step">03 · EXTRACT</span><h3>FactSpec</h3>
+              <div class="data-shape"><span>fact_key · value</span><span>confidence · partition</span><span>mem_type · is_temporal</span><span>evidence_ids=[mem_id]</span></div>
+              <div class="transform-op"><b>TO F5</b>按 scope + partition + fact_key 读取当前版本，比较值、时间、置信度和证据。</div>
+            </section>
+            <section class="transform-card">
+              <span class="transform-step">04 · GOVERN</span><h3>ConflictDecision</h3>
+              <div class="data-shape"><span>type: value/temporal/source</span><span>severity: high/mid/low</span><span>action: merge/replace/archive</span><span>pending/reject/keep + audit</span></div>
+              <div class="transform-op"><b>TO COMMIT</b>生成新 version 或合并 evidence；任何异值都追加 ConflictRecord。</div>
+            </section>
+            <section class="transform-card">
+              <span class="transform-step">05 · OUTPUT</span><h3>Governed Memory</h3>
+              <div class="data-shape"><span>SemanticFact + evidence_hash</span><span>GraphNode / GraphEdge</span><span>stale insight → superseded</span><span>Inbox: done 或 failed</span></div>
+              <div class="transform-op"><b>RETURN</b>返回 n_facts、n_insights、conflicts、promoted_l4 与 graph_audit。</div>
+            </section>
+          </div>
+          <div class="transform-rules">
+            <div class="transform-rule"><b>图谱门槛</b>importance ≥ 6 或 access_count &gt; 1 才生成 insight 与关联实体。</div>
+            <div class="transform-rule"><b>当前边界</b>mark_done / mark_failed 已有；lease、visibility timeout、DLQ 与事务 outbox 尚未完成。</div>
+            <div class="transform-rule"><b>目标替换点</b>LLM 只替换 EXTRACT 阶段并输出受 Schema 约束的 FactSpec，F5 与写权限保持确定性。</div>
+          </div>
+          <div class="slide-foot"><span>证据先于事实，冲突先于覆盖，图谱始终是可重建派生视图</span></div>
+        </article>
+
+        <article class="slide data-transform-slide">
+          <div class="slide-head"><div><p class="kicker">02E · Field lineage example</p><h2>一条偏好如何贯穿写入、固化与召回</h2><p class="slide-summary">以“请记住 user.lang_pref=zh”为例，追踪同一语义在各层中的形态变化。字段会逐步结构化，但 scope、来源证据和事实键始终可反向定位。</p></div><span class="slide-no">08</span></div>
+          <div class="transform-flow" aria-label="偏好数据端到端字段追踪">
+            <section class="transform-card">
+              <span class="transform-step">01 · USER</span><h3>原始请求</h3>
+              <div class="data-shape"><span>session_id: "session-a"</span><span>role: "user"</span><span>content: "请记住 user.lang_pref=zh"</span><span>scope_id: human_mem_project</span></div>
+              <div class="transform-op"><b>NORMALIZE</b>保留原文，补齐内部项目 scope，并识别显式记忆意图。</div>
+            </section>
+            <section class="transform-card">
+              <span class="transform-step">02 · L0</span><h3>Message</h3>
+              <div class="data-shape"><span>turn_id: 12 · token_len: n</span><span>role: user · ts: now</span><span>source_id:</span><span>scope/.../session-a/turn/12</span></div>
+              <div class="transform-op"><b>PROMOTE</b>显式路径跳过等待；F1 计算 importance，正文规范化后生成稳定 mem_id。</div>
+            </section>
+            <section class="transform-card">
+              <span class="transform-step">03 · L2 + INBOX</span><h3>Evidence</h3>
+              <div class="data-shape"><span>text: "user.lang_pref=zh"</span><span>mem_type: preference</span><span>source_ids: [message source]</span><span>item_id = hash(scope + mem_id)</span></div>
+              <div class="transform-op"><b>CONSOLIDATE</b>Inbox 以 mem_id 找回完整 L2；规则解析 key=value，并保留 evidence_ids。</div>
+            </section>
+            <section class="transform-card">
+              <span class="transform-step">04 · L3</span><h3>SemanticFact</h3>
+              <div class="data-shape"><span>fact_key: user.lang_pref</span><span>value: zh · partition: preference</span><span>version: 1 · confidence: c</span><span>evidence_ids: [mem_id]</span></div>
+              <div class="transform-op"><b>INDEX</b>写入版本链与 preference 分区；evidence_hash 固定本次证据集合。</div>
+            </section>
+            <section class="transform-card">
+              <span class="transform-step">05 · RECALL</span><h3>RecallResult</h3>
+              <div class="data-shape"><span>query: "回复语言是什么？"</span><span>facts[0].fact_key: user.lang_pref</span><span>facts[0].value: zh</span><span>episodes[] · reinforced[]</span></div>
+              <div class="transform-op"><b>DELIVER</b>preference 分区优先进入 facts；上层 Agent 据此选择中文回复。</div>
+            </section>
+          </div>
+          <div class="transform-rules">
+            <div class="transform-rule"><b>身份连续</b>scope_id 从入口贯穿 Message、EpisodicMemory、InboxItem、SemanticFact。</div>
+            <div class="transform-rule"><b>证据连续</b>Message.source_id → L2.source_ids；L2.mem_id → L3.evidence_ids。</div>
+            <div class="transform-rule"><b>语义连续</b>原文可重放，结构化事实可检索，召回结果仍携带版本与证据。</div>
+          </div>
+          <div class="slide-foot"><span>字段不是被覆盖，而是在可追溯标识上逐层增加语义</span></div>
+        </article>
+
+        <article class="slide data-transform-slide">
+          <div class="slide-head"><div><p class="kicker">02F · Graph projection</p><h2>图谱：高价值证据如何变成节点与边</h2><p class="slide-summary">L4 不是另一份事实主存，而是从 L2 派生的关系视图。当前实现创建 insight 与 entity 节点，并以 belong 边连接；节点按类型和规范化 label 幂等合并。</p></div><span class="slide-no">09</span></div>
+          <div class="transform-flow" aria-label="L4 图谱投影数据转换流程">
+            <section class="transform-card">
+              <span class="transform-step">01 · GATE</span><h3>EpisodicMemory</h3>
+              <div class="data-shape"><span>mem_id · text · mem_type</span><span>importance · access_count</span><span>source_ids[] · status=active</span><span>scope_id</span></div>
+              <div class="transform-op"><b>ELIGIBILITY</b>importance ≥ 6 或 access_count &gt; 1 才进入图谱投影，否则只保留 L2/L3。</div>
+            </section>
+            <section class="transform-card">
+              <span class="transform-step">02 · DERIVE</span><h3>Graph Inputs</h3>
+              <div class="data-shape"><span>label = insight_labeler(text)</span><span>entities = extract_entities(text)[:5]</span><span>evidence_ids = [mem_id]</span><span>type = semantic | procedural</span></div>
+              <div class="transform-op"><b>SCORE</b>insight salience = min(1, .3 + importance/10)；实体显著度取其 80% 且不低于 .3。</div>
+            </section>
+            <section class="transform-card">
+              <span class="transform-step">03 · INSIGHT</span><h3>GraphNode</h3>
+              <div class="data-shape"><span>node_type: insight</span><span>node_id: uuid5(scope + type + label)</span><span>label · salience · status=active</span><span>evidence_ids: [mem_id]</span></div>
+              <div class="transform-op"><b>UPSERT</b>相同规范化 label 复用 node_id，合并 evidence_ids，并保留更高 salience。</div>
+            </section>
+            <section class="transform-card">
+              <span class="transform-step">04 · RELATE</span><h3>Entity + Edge</h3>
+              <div class="data-shape"><span>entity.node_type: entity</span><span>entity.label · evidence_ids</span><span>edge: insight → entity</span><span>edge_type: belong · weight: .7</span></div>
+              <div class="transform-op"><b>CONNECT</b>实体同样按 label 幂等 upsert；重复边更新权重，不复制关系。</div>
+            </section>
+            <section class="transform-card">
+              <span class="transform-step">05 · READ MODEL</span><h3>Subgraph</h3>
+              <div class="data-shape"><span>nodes[]: id/type/label/salience</span><span>edges[]: source/target/type/weight</span><span>按 query label 或 entities 选种子</span><span>按 salience 截断到 k</span></div>
+              <div class="transform-op"><b>RETURN</b>作为 RecallResult.subgraph 返回；图查询失败时降级为空图，不阻断事实和 episode。</div>
+            </section>
+          </div>
+          <div class="transform-rules">
+            <div class="transform-rule"><b>来源约束</b>insight 必须引用 L2 mem_id，不能成为无证据的权威事实。</div>
+            <div class="transform-rule"><b>失效约束</b>证据被替换或归档时，相关 insight 标记为 superseded。</div>
+            <div class="transform-rule"><b>重建约束</b>L4 是派生读模型，可由 L2/L3 与 outbox 重放恢复。</div>
+          </div>
+          <div class="slide-foot"><span>Evidence 生成 Insight，Insight 连接 Entity，Subgraph 服务上下文扩展</span></div>
+        </article>
+
+        <article class="slide data-transform-slide">
+          <div class="slide-head"><div><p class="kicker">02G · Forget transformation</p><h2>遗忘：低价值证据如何安全退出</h2><p class="slide-summary">遗忘不是直接删除一条记录，而是先计算保持率和综合分数，再改变 L2 状态，并将失效证据级联到 L3 置信度和 L4 图谱审计。</p></div><span class="slide-no">10</span></div>
+          <div class="transform-flow" aria-label="遗忘与级联治理数据转换流程">
+            <section class="transform-card">
+              <span class="transform-step">01 · SNAPSHOT</span><h3>Active Memory</h3>
+              <div class="data-shape"><span>status · ts_last_access</span><span>stability · importance</span><span>access_count · occupancy</span><span>grace protection</span></div>
+              <div class="transform-op"><b>TO F3</b>跳过 deleted；新 active 记录在 grace window 内受保护。</div>
+            </section>
+            <section class="transform-card">
+              <span class="transform-step">02 · RETENTION</span><h3>F3 Score</h3>
+              <div class="data-shape"><span>elapsed = now - last_access</span><span>retention = exp(-elapsed/stability)</span><span>范围: 0..1</span><span>时间越久，保持率越低</span></div>
+              <div class="transform-op"><b>TO F4</b>将时间衰减与重要性、访问频次组合，避免只按时间粗暴删除。</div>
+            </section>
+            <section class="transform-card">
+              <span class="transform-step">03 · DECISION</span><h3>F4 + θdyn</h3>
+              <div class="data-shape"><span>importance_factor=.5+.5*i/10</span><span>access_factor=ln(1+count)+1</span><span>F4=F3 × importance × access</span><span>θdyn = f(store occupancy)</span></div>
+              <div class="transform-op"><b>TRANSITION</b>active 且 importance&lt;9、F4&lt;θ → archived；archived 且 F4&lt;.1θ → deleted。</div>
+            </section>
+            <section class="transform-card">
+              <span class="transform-step">04 · CASCADE</span><h3>Affected Evidence</h3>
+              <div class="data-shape"><span>archived_ids[] + deleted_ids[]</span><span>L3 only-evidence fact: confidence - penalty</span><span>低于 threshold: remove fact key</span><span>L4 salience decay + isolated prune</span></div>
+              <div class="transform-op"><b>TO AUDIT</b>失效证据不直接改写历史内容，而是驱动事实降权、节点剪枝和孤儿边检查。</div>
+            </section>
+            <section class="transform-card">
+              <span class="transform-step">05 · RESULT</span><h3>Forget Report</h3>
+              <div class="data-shape"><span>checked · archived · deleted</span><span>theta_dyn · occupancy</span><span>l3_degraded · l3_removed</span><span>l4_pruned · graph_audit</span></div>
+              <div class="transform-op"><b>PERSIST</b>scope 标记 dirty，并返回 storage_path；后续快照保存治理后的完整状态。</div>
+            </section>
+          </div>
+          <div class="transform-rules">
+            <div class="transform-rule"><b>可逆阶段</b>archived 仍可参与 recall，并在命中 reinforce 后恢复 active、增加 stability。</div>
+            <div class="transform-rule"><b>保护阶段</b>importance ≥ 9 的 active 记忆不会被常规 decay sweep 自动归档。</div>
+            <div class="transform-rule"><b>一致性阶段</b>删除证据后同步审计 L3/L4，避免事实和图谱继续引用失效来源。</div>
+          </div>
+          <div class="slide-foot"><span>先归档、再删除、后级联；召回强化可以延长高价值记忆寿命</span></div>
+        </article>
+
+        <article class="slide data-transform-slide">
+          <div class="slide-head"><div><p class="kicker">02H · Conflict transformation</p><h2>冲突：候选事实如何变成版本与审计</h2><p class="slide-summary">F5 在写入前同时读取候选和当前权威版本。相同值合并证据，不同值先分类、定级再裁决；任何异值路径都会生成 ConflictRecord。</p></div><span class="slide-no">11</span></div>
+          <div class="transform-flow" aria-label="事实冲突数据转换流程">
+            <section class="transform-card">
+              <span class="transform-step">01 · CANDIDATE</span><h3>Incoming Fact</h3>
+              <div class="data-shape"><span>fact_key · value · confidence</span><span>scope_id · partition · mem_type</span><span>evidence_ids[] · ts_update</span><span>evidence_hash · embedding</span></div>
+              <div class="transform-op"><b>VALIDATE</b>低于 confidence threshold 直接 reject，并记录 source 类型拒绝日志。</div>
+            </section>
+            <section class="transform-card">
+              <span class="transform-step">02 · LOOKUP</span><h3>Current Version</h3>
+              <div class="data-shape"><span>versions = facts[scope][fact_key]</span><span>current = versions[-1]</span><span>value · confidence · evidence_ids</span><span>valid_from · valid_until</span></div>
+              <div class="transform-op"><b>COMPARE</b>无当前版本则 created；同值不形成冲突，合并证据并取更高 confidence。</div>
+            </section>
+            <section class="transform-card">
+              <span class="transform-step">03 · DETECT</span><h3>Conflict Shape</h3>
+              <div class="data-shape"><span>type: temporal | negation | value</span><span>severity: high | mid | low</span><span>rivals: [current.to_dict()]</span><span>evidence_check</span></div>
+              <div class="transform-op"><b>CLASSIFY</b>时序 key 优先标记 temporal；否定语义单独分类，其余异值为 value。</div>
+            </section>
+            <section class="transform-card">
+              <span class="transform-step">04 · RESOLVE</span><h3>ConflictAction</h3>
+              <div class="data-shape"><span>temporal → archive</span><span>双高 confidence → pending</span><span>显著 confidence delta → replace/keep</span><span>近似时按时间、证据数裁决</span></div>
+              <div class="transform-op"><b>APPLY</b>replace/archive 追加 version；pending/reject/keep 保持当前权威值。</div>
+            </section>
+            <section class="transform-card">
+              <span class="transform-step">05 · OUTPUT</span><h3>Version + Audit</h3>
+              <div class="data-shape"><span>SemanticFact.version = current + 1</span><span>old.valid_until = incoming.ts?</span><span>ConflictRecord: old/new/action</span><span>conflict_id · policy_hit · resolved_to</span></div>
+              <div class="transform-op"><b>CASCADE</b>replace/archive 返回 superseded_evidence_ids，驱动相关 L4 insight 标记过期。</div>
+            </section>
+          </div>
+          <div class="transform-rules">
+            <div class="transform-rule"><b>同值不是冲突</b>合并 evidence_ids，confidence 取最大值，更新时间取较新值。</div>
+            <div class="transform-rule"><b>双高不静默覆盖</b>current 与 incoming 均 ≥ .95 时进入 pending，保留人工或策略复核空间。</div>
+            <div class="transform-rule"><b>时序保留历史</b>archive 关闭旧 valid_until，新事实追加为下一版本。</div>
+          </div>
+          <div class="slide-foot"><span>裁决结果与审计记录同时产生，事实变化始终可解释</span></div>
+        </article>
+
+        <article class="slide data-transform-slide">
+          <div class="slide-head"><div><p class="kicker">02I · Snapshot transformation</p><h2>持久化：运行时对象如何保存并恢复</h2><p class="slide-summary">本地持久化以 scope 为单位聚合 L0-L4、Inbox 和诊断信息，转换为 JSON 快照后原子替换文件；启动恢复时重新构建 dataclass、向量和检索索引。</p></div><span class="slide-no">12</span></div>
+          <div class="transform-flow" aria-label="快照持久化与恢复数据转换流程">
+            <section class="transform-card">
+              <span class="transform-step">01 · MUTATION</span><h3>Dirty Scope</h3>
+              <div class="data-shape"><span>observe / consolidate / forget</span><span>scope_id → dirty_scopes set</span><span>persist_on_write policy</span><span>last_path diagnostics</span></div>
+              <div class="transform-op"><b>COLLECT</b>PersistenceManager 只记录变更范围；需要 flush 时再请求完整 scope state。</div>
+            </section>
+            <section class="transform-card">
+              <span class="transform-step">02 · AGGREGATE</span><h3>ScopeSnapshot</h3>
+              <div class="data-shape"><span>l0{} · l1[] · l2[]</span><span>l3{facts, conflicts}</span><span>l4{nodes, edges} · inbox[]</span><span>persistence{} · architecture{}</span></div>
+              <div class="transform-op"><b>SERIALIZE</b>每个 dataclass 通过 to_dict 转成 JSON-safe 字段；枚举写 value，tuple/list 展开。</div>
+            </section>
+            <section class="transform-card">
+              <span class="transform-step">03 · ENCODE</span><h3>JSON State</h3>
+              <div class="data-shape"><span>ensure_ascii=false · indent=2</span><span>sort_keys=true</span><span>scope 路径名安全化</span><span>不保存模型 API key</span></div>
+              <div class="transform-op"><b>ATOMIC WRITE</b>先写 memory-state.json.tmp，再 replace 正式文件，避免半写快照。</div>
+            </section>
+            <section class="transform-card">
+              <span class="transform-step">04 · STORED</span><h3>memory-state.json</h3>
+              <div class="data-shape"><span>.memories/scopes/{scope}/</span><span>单 scope 完整状态</span><span>last_path 更新</span><span>dirty flag 清除</span></div>
+              <div class="transform-op"><b>HYDRATE</b>读取 JSON，按层清理旧 scope 状态，再逐类重建运行时对象。</div>
+            </section>
+            <section class="transform-card">
+              <span class="transform-step">05 · RESTORED</span><h3>Runtime + Indexes</h3>
+              <div class="data-shape"><span>L0 turns · L1 session keys</span><span>L2 token/inverted indexes 重建</span><span>L2/L3 embedding 重新计算</span><span>processing Inbox → pending</span></div>
+              <div class="transform-op"><b>VERIFY</b>返回各层恢复数量；L4 label index、edges 与 L3 partition index 同步恢复。</div>
+            </section>
+          </div>
+          <div class="transform-rules">
+            <div class="transform-rule"><b>原子性范围</b>单个 scope 文件原子替换；它不是跨数据库事务。</div>
+            <div class="transform-rule"><b>可重建字段</b>快照不保存 embedding，水合时按当前配置重新计算向量与索引。</div>
+            <div class="transform-rule"><b>恢复安全</b>崩溃时遗留的 processing 条目恢复为 pending，允许重新消费。</div>
+          </div>
+          <div class="slide-foot"><span>对象 → 快照 → JSON → 文件 → 对象，索引和派生字段在恢复时重建</span></div>
+        </article>
+
+        <article class="slide data-transform-slide">
+          <div class="slide-head"><div><p class="kicker">02J · Production mapping</p><h2>生产写穿：领域对象如何映射到外部存储</h2><p class="slide-summary">当前 Production Adapter 先执行内存实现，再把同一结果写入外部依赖。它验证了协议和字段映射，但读取仍以进程内状态为主，尚不具备多实例远程权威语义。</p></div><span class="slide-no">13</span></div>
+          <div class="transform-flow" aria-label="生产适配器数据映射流程">
+            <section class="transform-card">
+              <span class="transform-step">01 · DOMAIN</span><h3>Port Call</h3>
+              <div class="data-shape"><span>L0.append(Message)</span><span>Inbox.enqueue(Item)</span><span>L2.promote(EpisodicMemory)</span><span>L3.upsert / L4.add_insight</span></div>
+              <div class="transform-op"><b>LOCAL FIRST</b>Adapter 调用 super() 完成校验、幂等、索引与冲突逻辑，得到领域对象。</div>
+            </section>
+            <section class="transform-card">
+              <span class="transform-step">02 · SERIALIZE</span><h3>Backend Payload</h3>
+              <div class="data-shape"><span>Message / Inbox → JSON string</span><span>embedding tuple → "[v1,v2,...]"</span><span>value/source_ids → JSONB</span><span>GraphNode/Edge → parameter dict</span></div>
+              <div class="transform-op"><b>MAP</b>保留 scope_id 和稳定主键；枚举写字符串，向量转换为 pgvector 文本。</div>
+            </section>
+            <section class="transform-card">
+              <span class="transform-step">03 · WRITE</span><h3>External Commands</h3>
+              <div class="data-shape"><span>Redis RPUSH/LTRIM/EXPIRE</span><span>Redis HSET inbox:{scope}</span><span>PG INSERT ... ON CONFLICT</span><span>Neo4j MERGE node / REL edge</span></div>
+              <div class="transform-op"><b>COMMIT</b>PG 适配器逐次 commit；Neo4j 当前合并整个 scope 图快照。</div>
+            </section>
+            <section class="transform-card">
+              <span class="transform-step">04 · STORES</span><h3>External Shape</h3>
+              <div class="data-shape"><span>Redis LIST: L0 window</span><span>Redis HASH: Inbox item JSON</span><span>PG rows: L2/L3 + JSONB + vector</span><span>Neo4j: MemNode + REL</span></div>
+              <div class="transform-op"><b>CURRENT READ</b>外部写成功不改变当前查询来源；进程内 records/indexes 仍提供主要读取行为。</div>
+            </section>
+            <section class="transform-card">
+              <span class="transform-step">05 · TARGET</span><h3>Remote Authority</h3>
+              <div class="data-shape"><span>Redis claim + lease + DLQ</span><span>PG authoritative reads + tx</span><span>fact/conflict/outbox/inbox done</span><span>Neo4j idempotent projection</span></div>
+              <div class="transform-op"><b>EVOLVE</b>目标通过事务 outbox 与幂等重放替代同步跨库写，建立多实例一致性。</div>
+            </section>
+          </div>
+          <div class="transform-rules">
+            <div class="transform-rule"><b>当前事实</b>外部依赖是 write-through 骨架，不能据此宣称远程存储已经权威化。</div>
+            <div class="transform-rule"><b>失败风险</b>当前跨 Redis、PG、Neo4j 没有统一事务，部分写成功需要后续补偿设计。</div>
+            <div class="transform-rule"><b>演进方向</b>先让 PG/Redis 成为权威读写，再用 outbox 异步投影可重建的 Neo4j 图。</div>
+          </div>
+          <div class="slide-foot"><span>领域模型保持不变，Adapter 负责把它转换为各存储的原生表示</span></div>
+        </article>
+
+        <article class="slide data-transform-slide">
+          <div class="slide-head"><div><p class="kicker">02K · Entry normalization</p><h2>入口：HTTP、CLI 与 SDK 如何汇入同一领域调用</h2><p class="slide-summary">不同入口只负责解析和契约校验。业务作用域由 HumanMem 统一注入，真正的写入、召回、更新和遗忘都进入同一个 AgentMemory 服务边界。</p></div><span class="slide-no">14</span></div>
+          <div class="transform-flow" aria-label="入口请求到领域响应的数据转换流程">
+            <section class="transform-card">
+              <span class="transform-step">01 · TRANSPORT</span><h3>External Input</h3>
+              <div class="data-shape"><span>HTTP JSON body</span><span>CLI flags / stdin JSON</span><span>Python method args</span><span>session_id · operation payload</span></div>
+              <div class="transform-op"><b>PARSE</b>HTTP 进入 Pydantic schema；CLI 转为命令参数；SDK 保持 Python 类型。</div>
+            </section>
+            <section class="transform-card">
+              <span class="transform-step">02 · CONTRACT</span><h3>Typed Request</h3>
+              <div class="data-shape"><span>ObserveRequest{session_id,msg}</span><span>RecallRequest{query,k,entities}</span><span>ForgetRequest{mode,mem_id,force}</span><span>ConfigPatchRequest{updates}</span></div>
+              <div class="transform-op"><b>VALIDATE</b>补默认值并拒绝结构错误；update 空 payload 在 route 层返回 400。</div>
+            </section>
+            <section class="transform-card">
+              <span class="transform-step">03 · FACADE</span><h3>HumanMem Call</h3>
+              <div class="data-shape"><span>public session/query/message</span><span>scope_id = human_mem_project</span><span>k / force / task options</span><span>backend hidden from caller</span></div>
+              <div class="transform-op"><b>NORMALIZE</b>调用方无需提供 scope；Facade 注入项目作用域并选择统一方法签名。</div>
+            </section>
+            <section class="transform-card">
+              <span class="transform-step">04 · DOMAIN</span><h3>AgentMemory Result</h3>
+              <div class="data-shape"><span>observe: promoted / inbox_pending</span><span>recall: facts / episodes / subgraph</span><span>forget: archived / deleted</span><span>maintenance: task result map</span></div>
+              <div class="transform-op"><b>SERIALIZE</b>领域 dataclass 通过 to_dict 变为普通 dict，并附加诊断和 storage_path。</div>
+            </section>
+            <section class="transform-card">
+              <span class="transform-step">05 · RESPONSE</span><h3>Transport Output</h3>
+              <div class="data-shape"><span>HTTP: JSON + status code</span><span>CLI: ResultEnvelope / exit code</span><span>SDK: Dict[str, Any]</span><span>errors: stable exception mapping</span></div>
+              <div class="transform-op"><b>DELIVER</b>所有入口返回相同语义字段；仅呈现方式和错误传输协议不同。</div>
+            </section>
+          </div>
+          <div class="transform-rules">
+            <div class="transform-rule"><b>薄入口</b>Route 和 CLI 不复制记忆规则，只做解析、调用与结果呈现。</div>
+            <div class="transform-rule"><b>统一作用域</b>HumanMem 将外部调用全部映射到内部项目 scope，避免接入方误配隔离键。</div>
+            <div class="transform-rule"><b>契约一致</b>HTTP、CLI、SDK 最终共享 AgentMemory 的返回结构和治理语义。</div>
+          </div>
+          <div class="slide-foot"><span>入口可以替换，领域调用与数据语义保持一致</span></div>
+        </article>
+
+        <article class="slide data-transform-slide">
+          <div class="slide-head"><div><p class="kicker">02L · Configuration transformation</p><h2>配置：多来源值如何变成运行时依赖</h2><p class="slide-summary">领域策略来自 defaults 与 hms.json，模型和密钥只来自项目 .env 或进程环境；显式 overrides 最后覆盖。所有字段在构建后端之前统一转换和校验。</p></div><span class="slide-no">15</span></div>
+          <div class="transform-flow" aria-label="配置加载与后端装配数据转换流程">
+            <section class="transform-card">
+              <span class="transform-step">01 · SOURCES</span><h3>Raw Configuration</h3>
+              <div class="data-shape"><span>MemoryConfig defaults</span><span>~/.memx/hms.json: policy</span><span>project .env: model settings</span><span>process env · explicit overrides</span></div>
+              <div class="transform-op"><b>READ</b>JSON 必须是对象；dotenv 使用严格 key=value 子集，读取时不修改 os.environ。</div>
+            </section>
+            <section class="transform-card">
+              <span class="transform-step">02 · FILTER</span><h3>Allowed Fields</h3>
+              <div class="data-shape"><span>hms: thresholds / capacity / paths</span><span>env: gateway URL / API key / models</span><span>unknown fields rejected</span><span>model fields removed from hms</span></div>
+              <div class="transform-op"><b>ISOLATE</b>向 hms.json 写模型字段会报错；旧模型字段读取时忽略并在后续写入清理。</div>
+            </section>
+            <section class="transform-card">
+              <span class="transform-step">03 · MERGE</span><h3>Effective Mapping</h3>
+              <div class="data-shape"><span>defaults &lt; hms.json</span><span>&lt; project .env</span><span>&lt; process environment</span><span>&lt; explicit overrides</span></div>
+              <div class="transform-op"><b>COERCE</b>环境字符串按 binding 转成 float/string；JSON list temporal_fact_keys 转 tuple。</div>
+            </section>
+            <section class="transform-card">
+              <span class="transform-step">04 · VALIDATE</span><h3>MemoryConfig</h3>
+              <div class="data-shape"><span>frozen dataclass</span><span>positive limits / bounded ratios</span><span>memory_dir restricted to .memories</span><span>backend_mode: memory | production</span></div>
+              <div class="transform-op"><b>FAIL FAST</b>非法范围、路径和未知 backend 在启动阶段转成 ConfigurationError。</div>
+            </section>
+            <section class="transform-card">
+              <span class="transform-step">05 · ASSEMBLE</span><h3>Backend Bundle</h3>
+              <div class="data-shape"><span>memory → in-memory adapters</span><span>production → Redis / PG / Neo4j</span><span>SnapshotStore + LLMGateway</span><span>redacted diagnostics</span></div>
+              <div class="transform-op"><b>START</b>production 缺少必需连接参数时拒绝装配；有效配置驱动所有层级策略。</div>
+            </section>
+          </div>
+          <div class="transform-rules">
+            <div class="transform-rule"><b>密钥边界</b>API key 只在本地 .env 或进程环境中出现，不写 hms.json、快照和接口响应。</div>
+            <div class="transform-rule"><b>优先级边界</b>显式 overrides 最高，适合测试和嵌入式调用；默认值始终作为兜底。</div>
+            <div class="transform-rule"><b>校验边界</b>后端连接前完成配置类型、范围和依赖完整性检查。</div>
+          </div>
+          <div class="slide-foot"><span>来源隔离、确定优先级、统一校验，最后才装配外部依赖</span></div>
+        </article>
+
+        <article class="slide data-transform-slide">
+          <div class="slide-head"><div><p class="kicker">02M · Evaluation transformation</p><h2>评测：场景样本如何变成发布结论</h2><p class="slide-summary">每条 JSONL 样本被解析为独立契约，在全新 scope 和内存后端中执行写入、固化、召回，再把命中、排名、冲突、延迟聚合成可阻断发布的门禁报告。</p></div><span class="slide-no">16</span></div>
+          <div class="transform-flow" aria-label="评测数据到发布门禁的数据转换流程">
+            <section class="transform-card">
+              <span class="transform-step">01 · DATASET</span><h3>JSONL Case</h3>
+              <div class="data-shape"><span>case_id · description</span><span>memories[] · query · k</span><span>expected_facts[] / conflicts[]</span><span>expected_episode_terms[]</span></div>
+              <div class="transform-op"><b>PARSE</b>逐行 JSON 解码并构造 EvalCase；拒绝空场景、重复 case_id 和无断言样本。</div>
+            </section>
+            <section class="transform-card">
+              <span class="transform-step">02 · ISOLATE</span><h3>Case Runtime</h3>
+              <div class="data-shape"><span>new AgentMemory(config)</span><span>scope_id = eval-{case_id}</span><span>session_id = session-{case_id}</span><span>network-free deterministic backend</span></div>
+              <div class="transform-op"><b>EXECUTE</b>逐条 observe 固定时间戳，force reflect 清空 inbox，再计时 recall。</div>
+            </section>
+            <section class="transform-card">
+              <span class="transform-step">03 · MEASURE</span><h3>EvalCaseResult</h3>
+              <div class="data-shape"><span>fact / contract / conflict hits</span><span>episode hits · fact/episode MRR</span><span>consolidation_ok</span><span>recall_latency_ms · diagnostics</span></div>
+              <div class="transform-op"><b>ASSERT</b>事实值、partition、mem_type、version、evidence 数、冲突动作和 episode 词分别匹配。</div>
+            </section>
+            <section class="transform-card">
+              <span class="transform-step">04 · AGGREGATE</span><h3>Suite Metrics</h3>
+              <div class="data-shape"><span>case_pass_rate</span><span>fact_recall / contract_rate</span><span>conflict / episode hit rate</span><span>MRR · consolidation rate · P95</span></div>
+              <div class="transform-op"><b>COMPARE</b>min_* 指标必须不低于阈值；max_p95_recall_latency_ms 不得超限。</div>
+            </section>
+            <section class="transform-card">
+              <span class="transform-step">05 · GATE</span><h3>EvalReport</h3>
+              <div class="data-shape"><span>passed · metrics · thresholds</span><span>failed_gates[] · cases[]</span><span>dataset · generated_at</span><span>JSON report + process exit code</span></div>
+              <div class="transform-op"><b>RELEASE</b>failed_gates 非空时门禁失败；CI 可用非零退出码阻止质量回归进入发布。</div>
+            </section>
+          </div>
+          <div class="transform-rules">
+            <div class="transform-rule"><b>隔离性</b>每个 case 使用独立 AgentMemory 和 scope，避免样本之间相互污染。</div>
+            <div class="transform-rule"><b>可诊断性</b>报告保留 facts、episodes、conflicts、retrieval stats 和 consolidation 结果。</div>
+            <div class="transform-rule"><b>可重复性</b>默认评测不访问网络、不读取生产密钥，结果适合本地和 CI 回归。</div>
+          </div>
+          <div class="slide-foot"><span>样本契约 → 独立执行 → 单例指标 → 聚合指标 → 发布门禁</span></div>
+        </article>
+
+        <article class="slide data-transform-slide">
+          <div class="slide-head"><div><p class="kicker">02N · Raw to working example</p><h2>示例：Raw 对话如何压缩成工作记忆</h2><p class="slide-summary">L0 保留逐条消息和稳定来源 ID；达到轮次、token 或淘汰条件后，L1 将窗口压缩为摘要、实体和 slot。只有 closed slot 会继续晋升到 L2。</p></div><span class="slide-no">17</span></div>
+          <div class="transform-flow" aria-label="Raw 对话到 L1 工作记忆的结构示例">
+            <section class="transform-card">
+              <span class="transform-step">01 · RAW INPUT</span><h3>Message Dict</h3>
+              <div class="data-shape"><span>{role:"user",</span><span> content:"请实现备份流程",</span><span> ts:1700000000}</span><span>session_id:"s-42"</span></div>
+              <div class="transform-op"><b>APPEND</b>补 turn_id、token_len、scope_id，并验证 role/content。</div>
+            </section>
+            <section class="transform-card">
+              <span class="transform-step">02 · L0 WINDOW</span><h3>Message[]</h3>
+              <div class="data-shape"><span>#21 user: 请实现备份流程</span><span>#22 assistant: 正在处理</span><span>#23 user: 任务完成</span><span>source_id 精确到每个 turn</span></div>
+              <div class="transform-op"><b>TRIGGER</b>flush_turns、theta_ctx 或 TTL/容量淘汰触发窗口压缩。</div>
+            </section>
+            <section class="transform-card">
+              <span class="transform-step">03 · SUMMARIZE</span><h3>Summary Piece</h3>
+              <div class="data-shape"><span>user: 请实现备份流程 |</span><span>assistant: 正在处理 |</span><span>user: 任务完成</span><span>按 token budget 保留尾部</span></div>
+              <div class="transform-op"><b>EXTRACT</b>从 user 消息识别请求/约束 slot，并从中英文 token 提取实体。</div>
+            </section>
+            <section class="transform-card">
+              <span class="transform-step">04 · L1 STATE</span><h3>WorkingMemory</h3>
+              <div class="data-shape"><span>rolling_summary: "user: ..."</span><span>mentioned_entities:["备份流程"]</span><span>token_used: n</span><span>last_compress_ts: 1700000002</span></div>
+              <div class="transform-op"><b>STRUCTURE</b>摘要与旧摘要拼接；实体去重；slot 保留原始 source_ids。</div>
+            </section>
+            <section class="transform-card">
+              <span class="transform-step">05 · SLOT</span><h3>OpenSlot</h3>
+              <div class="data-shape"><span>slot_id:"s-42:23"</span><span>text:"任务完成"</span><span>status:"closed"</span><span>closed_reason · source_ids[]</span></div>
+              <div class="transform-op"><b>PROMOTE</b>closed slot 从 L1 移除，按 text/source_ids 生成 L2 EpisodicMemory。</div>
+            </section>
+          </div>
+          <div class="transform-rules">
+            <div class="transform-rule"><b>L0 的职责</b>保存可重放的逐条消息，不直接假设它们都是长期事实。</div>
+            <div class="transform-rule"><b>L1 的职责</b>压缩当前任务上下文，控制 token，同时保留未完成 slot。</div>
+            <div class="transform-rule"><b>晋升条件</b>显式记忆直接进入 L2；普通任务需形成 closed slot 后才沉淀。</div>
+          </div>
+          <div class="slide-foot"><span>Raw 保真，Working 压缩，Closed Slot 才进入长期证据层</span></div>
+        </article>
+
+        <article class="slide data-transform-slide">
+          <div class="slide-head"><div><p class="kicker">02O · L2 extraction examples</p><h2>示例：三类内容进入 L2 后的结构</h2><p class="slide-summary">L2 的物理结构一致，差异主要体现在 text、mem_type、importance 和来源。它仍是情景证据，不因类型不同而变成新的存储层。</p></div><span class="slide-no">18</span></div>
+          <div class="schema-grid" aria-label="L2 EpisodicMemory 示例">
+            <section class="schema-card blue"><h3>EPISODIC · 事件</h3><pre>raw:
+  "昨天完成数据库迁移"
+
+EpisodicMemory:
+  mem_id: hash(scope + text)
+  text: "昨天完成数据库迁移"
+  mem_type: episodic
+  importance: 5
+  status: active
+  source_ids: [turn-31]
+  access_count: 0
+  stability: 86400</pre></section>
+            <section class="schema-card green"><h3>PREFERENCE · 偏好</h3><pre>raw:
+  "记住 user.preference.editor=VSCode"
+
+EpisodicMemory:
+  mem_id: hash(scope + text)
+  text: "user.preference.editor=VSCode"
+  mem_type: preference
+  importance: F1(...)
+  status: active
+  source_ids: [turn-32]
+  embedding: runtime-selected[d]</pre></section>
+            <section class="schema-card red"><h3>PROCEDURAL · 流程</h3><pre>raw:
+  "记住 workflow.backup=daily_verify"
+
+EpisodicMemory:
+  mem_id: hash(scope + text)
+  text: "workflow.backup=daily_verify"
+  mem_type: procedural
+  importance: F1(...)
+  status: active
+  source_ids: [turn-33]
+  inbox: pending</pre></section>
+          </div>
+          <div class="transform-rules">
+            <div class="transform-rule"><b>统一物理模型</b>三种内容都使用 EpisodicMemory，并共享向量、倒排索引和遗忘字段。</div>
+            <div class="transform-rule"><b>类型识别</b>preference/偏好/喜欢 → preference；procedure/workflow/流程 → procedural。</div>
+            <div class="transform-rule"><b>幂等合并</b>同 scope 的相同 normalized text 复用 mem_id，合并 source_ids 并取更高 importance。</div>
+          </div>
+          <div class="slide-foot"><span>L2 统一保存证据，mem_type 决定后续分区与治理策略</span></div>
+        </article>
+
+        <article class="slide data-transform-slide">
+          <div class="slide-head"><div><p class="kicker">02P · L3/L4 extraction examples</p><h2>示例：证据固化后会生成什么结构</h2><p class="slide-summary">确定性抽取优先识别 key=value；fact key 和文本提示决定 L3 分区。满足图谱门槛的证据还会生成带 evidence_ids 的 insight、entity 与 belong 边。</p></div><span class="slide-no">19</span></div>
+          <div class="example-grid-4" aria-label="L3 与 L4 抽取结构示例">
+            <section class="schema-card blue"><h3>L3 · SEMANTIC</h3><pre>source:
+  project.deadline=2026-10-01
+
+SemanticFact:
+  fact_key: project.deadline
+  value: "2026-10-01"
+  partition: semantic
+  mem_type: semantic
+  version: 1
+  evidence_ids: [mem-a]
+  evidence_hash: hash(mem-a)</pre></section>
+            <section class="schema-card green"><h3>L3 · PREFERENCE</h3><pre>source:
+  user.preference.editor=VSCode
+
+SemanticFact:
+  fact_key: user.preference.editor
+  value: "VSCode"
+  partition: preference
+  mem_type: preference
+  confidence: .6 + importance/20
+  evidence_ids: [mem-b]</pre></section>
+            <section class="schema-card red"><h3>L3 · PROCEDURAL</h3><pre>source:
+  workflow.backup=daily_verify
+
+SemanticFact:
+  fact_key: workflow.backup
+  value: "daily_verify"
+  partition: procedural
+  mem_type: procedural
+  version: 1
+  evidence_ids: [mem-c]</pre></section>
+            <section class="schema-card"><h3>L4 · GRAPH</h3><pre>GraphNode insight:
+  id: uuid5(scope:type:label)
+  label: "workflow.backup..."
+  mem_type: procedural
+  salience: min(1,.3+i/10)
+  evidence_ids: [mem-c]
+
+GraphNode entity: "backup"
+GraphEdge:
+  insight -[belong,.7]-> entity</pre></section>
+          </div>
+          <div class="transform-rules">
+            <div class="transform-rule"><b>无 key=value</b>语言偏好可生成 user.lang_pref；普通显式文本生成 memory.explicit.{short_hash}。</div>
+            <div class="transform-rule"><b>置信度来源</b>当前 confidence 由规则基线与 L2 importance 线性组合，不是模型自评。</div>
+            <div class="transform-rule"><b>图谱门槛</b>importance ≥ 6 或 access_count &gt; 1；否则只保留 L2/L3，不创建 L4。</div>
+          </div>
+          <div class="slide-foot"><span>同一 L2 证据可派生 L3 事实与 L4 关系，但两者都保留 evidence_ids</span></div>
+        </article>
+
+        <article class="slide">
+          <div class="slide-head"><div><p class="kicker">03 · Deployment topology</p><h2>生产拓扑与一致性边界</h2></div><span class="slide-no">04</span></div>
+          <div class="grid-3">
+            <section class="flow"><div class="flow-title"><h3>在线服务</h3><span>SYNC</span></div><div class="flow-step"><i>1</i><b>Ingress → API replicas</b></div><div class="flow-step"><i>2</i><b>Redis L0 / cache</b></div><div class="flow-step"><i>3</i><b>PG L2/L3 authority</b></div><div class="flow-step"><i>4</i><b>Neo4j derived graph</b></div><p class="small">目标：任一实例写入后，其它实例在一致性窗口内可读。</p></section>
+            <section class="flow"><div class="flow-title"><h3>后台 Worker</h3><span>ASYNC</span></div><div class="flow-step"><i>1</i><b>claim inbox lease</b></div><div class="flow-step"><i>2</i><b>LLM decision / embed</b></div><div class="flow-step"><i>3</i><b>PG transaction + outbox</b></div><div class="flow-step"><i>4</i><b>project to Neo4j</b></div><p class="small">目标：commit 后 ack；崩溃、重复消费和图谱失败均可恢复。</p></section>
+            <section class="flow"><div class="flow-title"><h3>控制面</h3><span>VERIFY</span></div><div class="flow-step"><i>1</i><b>health / diagnostics</b></div><div class="flow-step"><i>2</i><b>metrics / traces</b></div><div class="flow-step"><i>3</i><b>eval release gates</b></div><div class="flow-step"><i>4</i><b>snapshot / repair</b></div><p class="small">当前已有 health、snapshot、offline eval；metrics 与 outbox repair 待补。</p></section>
+          </div>
+          <div class="formula">当前 Production Adapter = 本地行为 + 外部写穿<br><span class="small">目标 Production Adapter = 远程权威读写 + 可恢复最终一致</span></div>
+          <div class="slide-foot"><span>外部依赖能连接，不等于多实例生产语义已经完成</span></div>
+        </article>
+
+        <article class="slide">
+          <div class="slide-head"><div><p class="kicker">04 · Design principles</p><h2>六条原则约束同一条链路</h2><p class="slide-summary">原则不是口号，而是分别落在证据、在线读取、基础设施边界、事实写入、配置和发布阶段的工程约束。</p></div><span class="slide-no">05</span></div>
+          <div class="concept-layout">
+            <div class="compact-list">
+              <div class="compact-row"><i>01</i><b>证据优先</b><span>L3/L4 必须引用 L2 evidence_ids</span></div>
+              <div class="compact-row"><i>02</i><b>读快写慢</b><span>recall 零远程 LLM，重推理进入异步固化</span></div>
+              <div class="compact-row"><i>03</i><b>边界可替换</b><span>领域层依赖 Port，Adapter 隔离外部 SDK</span></div>
+              <div class="compact-row"><i>04</i><b>冲突不静默</b><span>版本、证据、pending 与审计日志共同裁决</span></div>
+              <div class="compact-row"><i>05</i><b>密钥不落盘</b><span>模型配置只来自 .env / Secret Manager</span></div>
+              <div class="compact-row"><i>06</i><b>质量可门禁</b><span>pytest 验证实现，evals 验证记忆语义</span></div>
+            </div>
+            <div class="diagram-board">
+              <div class="diagram-title">PRINCIPLE → RUNTIME CONTROL FLOW</div>
+              <div class="diagram-flow">
+                <div class="diagram-node"><strong>L2 Evidence</strong><span>保留原文、来源、时间与类型</span></div><i class="diagram-arrow"></i>
+                <div class="diagram-node accent"><strong>Govern</strong><span>Port 边界 · F5 冲突 · Secret 隔离</span></div><i class="diagram-arrow"></i>
+                <div class="diagram-node"><strong>Release</strong><span>有界 recall · eval gates · 可追溯结果</span></div>
+              </div>
+              <div class="guardrail-grid">
+                <div class="guardrail"><b>在线边界</b><br>延迟和候选规模必须可预测。</div>
+                <div class="guardrail"><b>写入边界</b><br>任何派生事实都不能绕过证据与冲突闸门。</div>
+              </div>
+            </div>
+          </div>
+          <div class="slide-foot"><span>每条原则都有代码边界与验证信号</span></div>
+        </article>
+
+        <article class="slide code-architecture-slide">
+          <div class="slide-head"><div><p class="kicker">05 · Code architecture</p><h2>依赖向内，能力向外</h2></div><span class="slide-no">06</span></div>
+          <div class="stack">
+            <div class="stack-list">
+              <div class="stack-item"><b>接口层</b><span>API · CLI · HTTP</span></div>
+              <div class="stack-item"><b>编排层</b><span>AgentMemory · Agents</span></div>
+              <div class="stack-item"><b>领域层</b><span>Ports · Models · Retrieval</span></div>
+              <div class="stack-item"><b>基础设施</b><span>Adapters · External Systems</span></div>
+            </div>
+            <div class="module-map">
+              <div class="module-row"><div class="module-label">ENTRY</div><div class="module-cells"><div>HumanMem</div><div>mem CLI</div><div>FastAPI</div></div></div>
+              <div class="module-row"><div class="module-label">FLOW</div><div class="module-cells"><div>RecallAgent</div><div>ConsolidationAgent</div><div>Scheduler</div></div></div>
+              <div class="module-row"><div class="module-label">DOMAIN</div><div class="module-cells"><div>L0—L4 Ports</div><div>Conflict Governance</div><div>Hybrid Retrieval</div></div></div>
+              <div class="module-row"><div class="module-label">I/O</div><div class="module-cells"><div>Memory Adapter</div><div>Production Adapter</div><div>LLM Gateway</div></div></div>
+            </div>
+          </div>
+          <div class="slide-foot"><span>领域层禁止直接依赖 FastAPI、CLI 或数据库 SDK</span></div>
+        </article>
+
+        <article class="slide">
+          <div class="slide-head"><div><p class="kicker">06 · Memory classification</p><h2>两条轴：存储层级 × 语义类型</h2><p class="slide-summary">层级决定生命周期和存储责任，类型决定冲突策略与检索意图；二者正交，不能把 preference 当作新的物理层。</p></div><span class="slide-no">07</span></div>
+          <div class="classification">
+            <div class="axis">LAYER \ TYPE</div><div class="head">EPISODIC<br>发生过什么</div><div class="head">SEMANTIC<br>事实是什么</div><div class="head">PREFERENCE<br>倾向什么</div><div class="head">PROCEDURAL<br>如何去做</div>
+            <div class="axis">L0 RAW</div><div class="episodic">原始事件消息</div><div class="semantic">事实原话</div><div class="preference">偏好原话</div><div class="procedural">流程原话</div>
+            <div class="axis">L1 WORKING</div><div class="episodic">最近摘要</div><div class="semantic">事实候选</div><div class="preference">偏好 slot</div><div class="procedural">任务 / 步骤 slot</div>
+            <div class="axis">L2 EVIDENCE</div><div class="episodic">主存储</div><div class="semantic">事实证据</div><div class="preference">偏好证据</div><div class="procedural">流程证据</div>
+            <div class="axis">L3 FACT</div><div class="episodic">—</div><div class="semantic">semantic partition</div><div class="preference">preference partition</div><div class="procedural">procedural partition</div>
+            <div class="axis">L4 GRAPH</div><div class="episodic">事件实体</div><div class="semantic">概念 / 洞察</div><div class="preference">个性化关系</div><div class="procedural">步骤 / 依赖图</div>
+          </div>
+          <div class="classification-mobile">
+            <div class="state-node blue"><b>EPISODIC</b><span>L0 原话 → L1 摘要 → L2 事件证据 → L4 事件实体</span></div>
+            <div class="state-node"><b>SEMANTIC</b><span>L2 事实证据 → L3 semantic fact → L4 概念与洞察</span></div>
+            <div class="state-node"><b>PREFERENCE</b><span>L2 偏好证据 → L3 preference partition → 个性化关系</span></div>
+            <div class="state-node red"><b>PROCEDURAL</b><span>L2 流程证据 → L3 procedural index → L4 步骤依赖图</span></div>
+          </div>
+          <div class="grid-2">
+            <div class="panel blue"><h3>层级回答“放在哪里”</h3><p>L0-L4 描述持久性、组织程度、读写成本和治理强度。</p></div>
+            <div class="panel red"><h3>类型回答“它是什么”</h3><p>四种 MemoryType 决定分区、冲突策略、检索意图和输出优先级。</p></div>
+          </div>
+          <div class="slide-foot"><span>preference 是类型，不是第六层；procedural 也复用 L2/L3/L4</span></div>
+        </article>
+
+        <article class="slide">
+          <div class="slide-head"><div><p class="kicker">07 · Memory topology</p><h2>五层是一条证据升维链</h2><p class="slide-summary">数据不会自动逐层复制：只有压缩、显式记忆、固化与高价值门槛触发升维；读取则从 L2/L3/L4 汇聚，而不是逆向改写证据。</p></div><span class="slide-no">08</span></div>
+          <div>
+            <div class="memory-flow">
+              <div class="memory-node"><span>L0 · RAW</span><strong>原始观察</strong><p>消息环形窗口，保留 role、content、time。</p><small>TTL / turns / tokens</small></div><i class="diagram-arrow"></i>
+              <div class="memory-node"><span>L1 · WORKING</span><strong>工作记忆</strong><p>滚动摘要、开放 slot、当前实体。</p><small>compress / close slot</small></div><i class="diagram-arrow"></i>
+              <div class="memory-node"><span>L2 · EVIDENCE</span><strong>情景证据</strong><p>可检索 episode，是所有派生结构的来源根。</p><small>vector / importance / stability</small></div><i class="diagram-arrow"></i>
+              <div class="memory-node"><span>L3 · FACT</span><strong>治理事实</strong><p>按 partition 保存 key/value、版本与冲突。</p><small>F5 / evidence / validity</small></div><i class="diagram-arrow"></i>
+              <div class="memory-node"><span>L4 · GRAPH</span><strong>认知图谱</strong><p>实体、关系和 insight，作为可重建派生视图。</p><small>salience / relation / audit</small></div>
+            </div>
+            <div class="memory-note-row">
+              <div class="memory-note"><b>写入触发</b><br>显式记忆或 closed slot 才进入 L2。</div>
+              <div class="memory-note"><b>演化触发</b><br>Inbox + conflict gate 决定 L3/L4 派生。</div>
+              <div class="memory-note"><b>读取汇聚</b><br>facts、episodes、subgraph 并行召回后组装。</div>
+            </div>
+          </div>
+          <div class="slide-foot"><span>升维：对话 → 证据 → 事实 → 洞察</span></div>
+        </article>
+
+        <article class="slide">
+          <div class="slide-head"><div><p class="kicker">08 · Semantic types</p><h2>类型决定治理，不决定物理层</h2><p class="slide-summary">同一条 L2 证据可以被分类为不同认知角色；类型随后决定分区、冲突规则、召回入口与保留策略。</p></div><span class="slide-no">09</span></div>
+          <div class="type-layout">
+            <div class="type-matrix">
+              <section class="type-item"><span>EPISODIC · 发生过什么</span><h3>情景记忆</h3><p>L2 主存储；事件允许并存，按相关性、近因与重要性检索。</p></section>
+              <section class="type-item"><span>SEMANTIC · 事实是什么</span><h3>语义事实</h3><p>L3 版本化；同 key 不同值进入 F5，证据失效后降置信。</p></section>
+              <section class="type-item"><span>PREFERENCE · 倾向什么</span><h3>偏好记忆</h3><p>独立 preference partition；在线优先注入，目标支持条件与强度。</p></section>
+              <section class="type-item"><span>PROCEDURAL · 如何去做</span><h3>程序记忆</h3><p>L3 索引 + L4 图式；按任务适用性、流程版本和步骤完整度治理。</p></section>
+            </div>
+            <div class="diagram-board">
+              <div class="diagram-title">CLASSIFICATION → GOVERNANCE FLOW</div>
+              <div class="governance-flow">
+                <div class="governance-node"><b>L2 INPUT</b><span>保留原始文本、来源和 evidence ID</span></div>
+                <i class="governance-link"></i>
+                <div class="governance-node"><b>CLASSIFY</b><span>当前规则；目标为 Schema 约束的模型决策</span></div>
+                <i class="governance-link"></i>
+                <div class="governance-node"><b>PARTITION</b><span>semantic / preference / procedural</span></div>
+                <i class="governance-link"></i>
+                <div class="governance-node"><b>POLICY</b><span>冲突、排序、保留与图谱投影</span></div>
+              </div>
+            </div>
+          </div>
+          <div class="slide-foot"><span>当前分类依赖显式 key、preference/workflow 关键词；自由文本分类待 LLM 接入</span></div>
+        </article>
+
+        <article class="slide">
+          <div class="slide-head"><div><p class="kicker">09 · Classification flow</p><h2>同源证据，单向升维</h2></div><span class="slide-no">10</span></div>
+          <div class="pipeline">
+            <div class="pipe-node"><b>MESSAGE</b><br><span class="small">L0 raw</span></div><i class="pipe-arrow"></i>
+            <div class="pipe-node"><b>WORKING</b><br><span class="small">L1 slots</span></div><i class="pipe-arrow"></i>
+            <div class="pipe-node"><b>EPISODE</b><br><span class="small">L2 evidence</span></div><i class="pipe-arrow"></i>
+            <div class="pipe-node"><b>CLASSIFY</b><br><span class="small">rule now · LLM target</span></div>
+          </div>
+          <div class="grid-3">
+            <div class="panel green"><h3>Semantic</h3><p>事实候选经过 confidence gate 与版本冲突治理后写入 semantic partition。</p></div>
+            <div class="panel yellow"><h3>Preference</h3><p>偏好证据写 preference partition，并在在线 recall 中优先返回。</p></div>
+            <div class="panel red"><h3>Procedural</h3><p>流程事实写 procedural partition，高价值内容进一步生成 L4 insight。</p></div>
+          </div>
+          <div class="formula">不变式：L3 / L4 必须携带 L2 evidence_ids<br><span class="small">分类改变派生结果，不修改原始 episode 与来源</span></div>
+          <div class="slide-foot"><span>事件原料 → 类型判定 → 事实/偏好/程序 → 图谱洞察</span></div>
+        </article>
+
+        <article class="slide">
+          <div class="slide-head"><div><p class="kicker">10 · Runtime flows</p><h2>三条链路，三种工程纪律</h2><p class="slide-summary">写入强调快速接收与证据落地，读取强调有界延迟，演化强调质量、审计和可恢复性。</p></div><span class="slide-no">11</span></div>
+          <div class="flow-board">
+            <section class="flow"><div class="flow-title"><h3>写入</h3><span>FAST</span></div><div class="flow-step"><i>1</i><b>append L0</b></div><div class="flow-step"><i>2</i><b>compress L1</b></div><div class="flow-step"><i>3</i><b>promote L2</b></div><div class="flow-step"><i>4</i><b>enqueue inbox</b></div><p class="small">显式记忆快速进入证据层；后台固化不阻塞用户请求。</p></section>
+            <section class="flow"><div class="flow-title"><h3>读取</h3><span>BOUNDED</span></div><div class="flow-step"><i>1</i><b>plan routes</b></div><div class="flow-step"><i>2</i><b>dense + sparse</b></div><div class="flow-step"><i>3</i><b>RRF + F2</b></div><div class="flow-step"><i>4</i><b>reinforce</b></div><p class="small">候选池有界，默认零 LLM；facts、episodes、graph 汇聚输出。</p></section>
+            <section class="flow"><div class="flow-title"><h3>演化</h3><span>ASYNC</span></div><div class="flow-step"><i>1</i><b>pull inbox</b></div><div class="flow-step"><i>2</i><b>extract / decide</b></div><div class="flow-step"><i>3</i><b>conflict gate</b></div><div class="flow-step"><i>4</i><b>write + ack</b></div><p class="small">当前为规则固化；目标是 Schema 约束的 LLM 决策加规则降级。</p></section>
+          </div>
+          <div class="slide-foot"><span>读路径保护延迟，演化路径追求质量</span></div>
+        </article>
+
+        <article class="slide">
+          <div class="slide-head"><div><p class="kicker">11 · Consolidation now</p><h2>当前固化：规则驱动、冲突受控</h2></div><span class="slide-no">12</span></div>
+          <div class="pipeline">
+            <div class="pipe-node"><b>REFLECT</b><br><span class="small">threshold / force</span></div><i class="pipe-arrow"></i>
+            <div class="pipe-node"><b>PULL</b><br><span class="small">priority batch</span></div><i class="pipe-arrow"></i>
+            <div class="pipe-node"><b>GET L2</b><br><span class="small">evidence exists?</span></div><i class="pipe-arrow"></i>
+            <div class="pipe-node"><b>EXTRACT</b><br><span class="small">key=value / keywords</span></div><i class="pipe-arrow"></i>
+            <div class="pipe-node"><b>WRITE</b><br><span class="small">L3 + L4 + ack</span></div>
+          </div>
+          <div class="grid-3">
+            <section class="flow"><div class="flow-title"><h3>触发</h3><span>CURRENT</span></div><div class="flow-step"><i>1</i><b>active importance sum</b></div><div class="flow-step"><i>2</i><b>reflect threshold</b></div><div class="flow-step"><i>3</i><b>force fills inbox</b></div><p class="small">Scheduler 只提供 run-once 状态管理，没有常驻分布式触发器。</p></section>
+            <section class="flow"><div class="flow-title"><h3>事实</h3><span>RULES</span></div><div class="flow-step"><i>1</i><b>remember key=value</b></div><div class="flow-step"><i>2</i><b>language shortcut</b></div><div class="flow-step"><i>3</i><b>preference fallback</b></div><p class="small">confidence 由 importance 线性派生，覆盖面受显式文本模式限制。</p></section>
+            <section class="flow"><div class="flow-title"><h3>图谱</h3><span>GATED</span></div><div class="flow-step"><i>1</i><b>importance ≥ 6</b></div><div class="flow-step"><i>2</i><b>or access_count &gt; 1</b></div><div class="flow-step"><i>3</i><b>insight + top entities</b></div><p class="small">L4 是派生视图；旧 evidence 被替换时 insight 标为 superseded。</p></section>
+          </div>
+          <div class="slide-foot"><span>LLMGatewayPort 已存在，但当前 ConsolidationAgent 尚未调用</span></div>
+        </article>
+
+        <article class="slide">
+          <div class="slide-head"><div><p class="kicker">12 · Consolidation target</p><h2>目标固化：有界决策，可恢复提交</h2><p class="slide-summary">模型负责扩大分类与抽取覆盖面，但不拥有写权限；可靠队列、Schema 校验、F5 冲突闸门和事务性 outbox 共同定义生产语义。</p></div><span class="slide-no">13</span></div>
+          <div class="target-layout">
+            <div class="target-pipeline">
+              <div class="target-step"><span>01 · EVIDENCE</span><strong>Recall related</strong><p>按 scope 与实体召回 L2/L3/L4，限制候选数和 token 预算。</p><small>空结果可继续 · 超限先截断低价值证据</small></div>
+              <div class="target-step"><span>02 · CONTEXT</span><strong>Build context</strong><p>去敏、去重，附加 evidence ID、prompt 与 schema 版本。</p><small>输出可重放的 model context</small></div>
+              <div class="target-step"><span>03 · DECISION</span><strong>LLM decide JSON</strong><p>仅提出 operation、type、fact、confidence 与关系候选。</p><small>timeout / 非 JSON / 越权字段 → rules fallback</small></div>
+              <div class="target-step"><span>04 · GOVERN</span><strong>Conflict gate</strong><p>F5 根据时序、置信度、证据量裁决 merge、replace 或 pending。</p><small>双高冲突不静默覆盖</small></div>
+              <div class="target-step"><span>05 · COMMIT</span><strong>Embed + write L3</strong><p>校验向量版本，在 PostgreSQL 事务内写事实、冲突与审计。</p><small>失败整体回滚 · 不提前 ack</small></div>
+              <div class="target-step"><span>06 · PROJECT</span><strong>Write graph outbox</strong><p>事务内写 outbox，事务外幂等投影 Neo4j 洞察与关系。</p><small>图失败不回滚权威事实</small></div>
+              <div class="target-step"><span>07 · ACK</span><strong>Complete inbox</strong><p>提交成功后确认 lease；可重试失败进入退避，耗尽后进 DLQ。</p><small>commit 后崩溃可幂等重放</small></div>
+              <div class="target-step"><span>RESULT · AUDIT</span><strong>可解释输出</strong><p>记录 action、evidence、模型与 prompt hash、耗时、token 和成本。</p><small>支持 shadow eval、回归定位与人工复核</small></div>
+            </div>
+            <div class="target-controls">
+              <div class="target-control"><b>事务边界</b>L3 fact + conflict log + graph outbox + inbox done 在同一 PostgreSQL transaction。</div>
+              <div class="target-control"><b>幂等边界</b>hash(scope_id + mem_id + pipeline_version)，重复投递不重复产事实。</div>
+              <div class="target-control"><b>发布门禁</b>Schema 合规率、fallback 率、冲突动作、Recall@K、P95 与成本共同验收。</div>
+            </div>
+          </div>
+          <div class="slide-foot"><span>目标：模型提升覆盖率，但不牺牲确定性、安全性与恢复能力</span></div>
+        </article>
+
+        <article class="slide">
+          <div class="slide-head"><div><p class="kicker">13 · State & conflict</p><h2>队列状态与事实仲裁</h2></div><span class="slide-no">14</span></div>
+          <div class="state-grid">
+            <div>
+              <span class="split-label">INBOX STATE</span>
+              <div class="state-track">
+                <div class="state-node"><b>PENDING</b><span>按 importance、时间、item_id 排序</span></div>
+                <div class="state-node blue"><b>PROCESSING</b><span>当前无 lease；目标增加 owner 与 expiry</span></div>
+                <div class="state-node"><b>DONE</b><span>L3/L4 成功后 mark_done</span></div>
+                <div class="state-node red"><b>FAILED</b><span>达到 max_retries；目标进入 DLQ 并可 replay</span></div>
+              </div>
+            </div>
+            <div>
+              <span class="split-label">F5 CONFLICT ORDER</span>
+              <div class="state-track">
+                <div class="state-node"><b>SAME</b><span>同值：合并 evidence，置信度取高值</span></div>
+                <div class="state-node blue"><b>TEMPORAL</b><span>关闭旧 valid_until，追加新 version</span></div>
+                <div class="state-node red"><b>HIGH</b><span>双高置信冲突：pending，不静默覆盖</span></div>
+                <div class="state-node"><b>DELTA</b><span>置信差、更新时间、证据数依次裁决</span></div>
+              </div>
+            </div>
+          </div>
+          <pre class="code-sheet">ConflictAction = replace | merge | archive | pending | reject | keep
+queue_id = hash(scope_id + mem_id)
+target_idempotency = hash(scope_id + mem_id + pipeline_version)</pre>
+          <div class="slide-foot"><span>当前缺口：lease、visibility timeout、DLQ、跨 PG/Neo4j 事务补偿</span></div>
+        </article>
+
+        <article class="slide">
+          <div class="slide-head"><div><p class="kicker">14 · Retrieval mechanics</p><h2>召回不是“向量 Top-K”</h2><p class="slide-summary">检索质量由候选生成、路由融合、重排、类型优先级和失败降级共同决定；单一向量相似度无法承担完整语义。</p></div><span class="slide-no">15</span></div>
+          <div class="grid-2">
+            <div>
+              <div class="formula">F2 = .55 relevance<br>+ .20 recency<br>+ .25 importance</div>
+              <p class="small" style="margin-top:12px">dense 捕获语义，sparse 保护精确词，graph 扩展关系；RRF 先融合，再按 F2 重排。</p>
+            </div>
+            <div class="pipeline">
+              <div class="pipe-node"><b>QUERY</b><br><span class="small">tokens / entities</span></div><i class="pipe-arrow"></i>
+              <div class="pipe-node"><b>ROUTES</b><br><span class="small">dense · sparse · graph</span></div><i class="pipe-arrow"></i>
+              <div class="pipe-node"><b>FUSE</b><br><span class="small">RRF</span></div><i class="pipe-arrow"></i>
+              <div class="pipe-node"><b>RANK</b><br><span class="small">F2</span></div>
+            </div>
+          </div>
+          <div class="grid-4">
+            <div class="panel blue"><h3>有界候选</h3><p>倍数与 hard limit 防止退化为全量扫描。</p></div>
+            <div class="panel red"><h3>偏好优先</h3><p>L3 preference 分区先于一般事实进入结果。</p></div>
+            <div class="panel yellow"><h3>命中强化</h3><p>访问次数和 stability 反馈到长期保留。</p></div>
+            <div class="panel green"><h3>诊断可见</h3><p>候选、过滤、路由来源与排名数量均可追踪。</p></div>
+          </div>
+          <div class="slide-foot"><span>本地模式为确定性 embedding；生产模式可接 Gateway，重排仍为规则实现</span></div>
+        </article>
+
+        <article class="slide">
+          <div class="slide-head"><div><p class="kicker">15 · Two retrieval engines</p><h2>在线 Recall 与三路 Search 必须区分</h2></div><span class="slide-no">16</span></div>
+          <div class="grid-2">
+            <section class="flow">
+              <div class="flow-title"><h3>AgentMemory.recall</h3><span>ONLINE</span></div>
+              <div class="flow-step"><i>1</i><b>L2 dense + sparse → RRF → F2</b></div>
+              <div class="flow-step"><i>2</i><b>命中 episode reinforce</b></div>
+              <div class="flow-step"><i>3</i><b>L3 preference-first + relevant facts</b></div>
+              <div class="flow-step"><i>4</i><b>L4 graph query 独立返回</b></div>
+              <p class="small">facts、episodes、subgraph 最终组装；L4 不参与 L2 的同一 RRF 排名。</p>
+            </section>
+            <section class="flow">
+              <div class="flow-title"><h3>HybridSearchPipeline</h3><span>SEARCH</span></div>
+              <div class="flow-step"><i>1</i><b>vector / keyword / graph routes</b></div>
+              <div class="flow-step"><i>2</i><b>按 mem_id 做三路 RRF</b></div>
+              <div class="flow-step"><i>3</i><b>score dimensions + reranker</b></div>
+              <div class="flow-step"><i>4</i><b>graph related expansion</b></div>
+              <p class="small">单路失败进入 route_errors；reranker 失败退回 combined + RRF。</p>
+            </section>
+          </div>
+          <div class="formula">当前缺口：两个检索引擎尚未收敛<br><span class="small">在线 recall 的 plan 是解释结构，不是通用 DAG 执行器</span></div>
+          <div class="slide-foot"><span>文档明确当前真实调用链，避免把搜索管线误写成在线 recall</span></div>
+        </article>
+
+        <article class="slide">
+          <div class="slide-head"><div><p class="kicker">16 · Retrieval internals</p><h2>候选、融合、重排、降级</h2></div><span class="slide-no">17</span></div>
+          <div class="pipeline">
+            <div class="pipe-node"><b>TOKENIZE</b><br><span class="small">中文单字 + 英数词</span></div><i class="pipe-arrow"></i>
+            <div class="pipe-node"><b>POOL</b><br><span class="small">sparse hit + hot fallback</span></div><i class="pipe-arrow"></i>
+            <div class="pipe-node"><b>FILTER</b><br><span class="small">dense ≥ min or overlap</span></div><i class="pipe-arrow"></i>
+            <div class="pipe-node"><b>RRF</b><br><span class="small">1 / (60 + rank)</span></div><i class="pipe-arrow"></i>
+            <div class="pipe-node"><b>RERANK</b><br><span class="small">F2 + coverage</span></div>
+          </div>
+          <div class="grid-2">
+            <div class="formula-list">
+              <div class="formula-row"><b>F2</b><code>.55 relevance + .20 recency + .25 importance</code></div>
+              <div class="formula-row"><b>REL</b><code>.7 dense + .3 keyword + graph_bonus</code></div>
+              <div class="formula-row"><b>FINAL</b><code>.75 combined + .15 RRF + .10 route coverage</code></div>
+            </div>
+            <pre class="code-sheet">candidate_source:
+  empty_query_hot_fallback
+  no_sparse_match_hot_fallback
+  sparse_only_bounded
+  sparse_plus_hot_fallback
+
+fallback:
+  route error → keep healthy routes
+  rerank error → combined + RRF
+  graph error → empty subgraph</pre>
+          </div>
+          <div class="slide-foot"><span>默认 k≤50、candidate hard limit=1000、在线路径零远程 LLM</span></div>
+        </article>
+
+        <article class="slide">
+          <div class="slide-head"><div><p class="kicker">17 · Data structures I</p><h2>L0、L1、L2：从消息到证据</h2></div><span class="slide-no">18</span></div>
+          <div class="schema-grid">
+            <section class="schema-card blue"><h3>Message · L0</h3><pre>turn_id: int
+role: user|assistant|tool|system
+content: str
+ts: float
+token_len: int
+session_id: str
+scope_id: str
+
+PK = scope + session + turn</pre></section>
+            <section class="schema-card"><h3>WorkingMemory · L1</h3><pre>session_id: str
+rolling_summary: str
+open_slots: list[dict]
+mentioned_entities: list[str]
+token_used: int
+last_compress_ts: float
+scope_id: str
+
+closed slot → promote</pre></section>
+            <section class="schema-card green"><h3>EpisodicMemory · L2</h3><pre>mem_id: str
+embedding: tuple[float]
+text: str
+importance: 0..10
+ts_create / ts_last_access
+access_count: int
+stability: float
+status: active|archived|deleted
+source_ids: list[str]
+mem_type: MemoryType</pre></section>
+          </div>
+          <div class="grid-3">
+            <div class="panel blue"><h3>身份</h3><p>scope + session 隔离短期状态，source_id 连接原始 turn。</p></div>
+            <div class="panel yellow"><h3>幂等</h3><p>mem_id = hash(scope + normalized text)，重复写合并来源。</p></div>
+            <div class="panel green"><h3>索引</h3><p>records + token_index + inverted_index 支撑 dense/sparse。</p></div>
+          </div>
+          <div class="slide-foot"><span>L2 是所有 L3/L4 派生结构的证据根</span></div>
+        </article>
+
+        <article class="slide">
+          <div class="slide-head"><div><p class="kicker">18 · Data structures II</p><h2>L3、L4、Inbox：事实、图与任务</h2></div><span class="slide-no">19</span></div>
+          <div class="schema-grid">
+            <section class="schema-card green"><h3>SemanticFact · L3</h3><pre>fact_key / value
+scope_id / partition
+confidence: 0..1
+evidence_ids: list[str]
+version: int
+evidence_hash: str
+is_temporal: bool
+valid_from / valid_until
+mem_type: MemoryType</pre></section>
+            <section class="schema-card red"><h3>GraphNode / Edge · L4</h3><pre>node_id / node_type / label
+scope_id / salience
+evidence_ids / status / mem_type
+
+source_id / target_id
+edge_type:
+  cause|belong|temporal|similar
+weight: 0..1</pre></section>
+            <section class="schema-card blue"><h3>InboxItem</h3><pre>item_id = hash(scope + mem)
+scope_id / mem_id / text
+priority / ts_enqueue
+mem_type_hint
+status:
+  pending|processing|done|failed
+retry_count / last_error
+
+target: lease / DLQ / pipeline_version</pre></section>
+          </div>
+          <pre class="code-sheet">L3 primary key = (scope_id, partition, fact_key, version)
+L4 invariant = every insight references evidence_ids
+Snapshot = {l0, l1, l2, l3:{facts,conflicts}, l4:{nodes,edges}, inbox, persistence, architecture}</pre>
+          <div class="slide-foot"><span>当前字段来自实际 dataclass；lease、向量版本和模型审计属于目标扩展</span></div>
+        </article>
+
+        <article class="slide">
+          <div class="slide-head"><div><p class="kicker">19 · Model configuration</p><h2>模型变量离开 hms.json</h2></div><span class="slide-no">20</span></div>
+          <div class="config-layout">
+            <div>
+              <div class="priority">
+                <div class="priority-row">1 · EXPLICIT OVERRIDES</div>
+                <div class="priority-row">2 · PROCESS ENV</div>
+                <div class="priority-row">3 · PROJECT .ENV</div>
+                <div class="priority-row">4 · DEFAULTS</div>
+                <div class="priority-row">HMS MODEL FIELDS · IGNORED</div>
+              </div>
+              <p class="small" style="margin-top:12px">写入 hms.json 的模型字段会被拒绝；有效配置输出中的 API key 自动脱敏。</p>
+            </div>
+            <pre class="code-sheet">MEMX_LLM_GATEWAY_URL=http://localhost:8080
+MEMX_LLM_API_KEY=
+MEMX_LLM_MODEL=decision-model
+MEMX_EMBEDDING_BACKEND=auto
+MEMX_EMBEDDING_MODEL=embedding-model
+MEMX_LLM_REQUEST_TIMEOUT_SECONDS=10
+
+# policy stays in hms.json
+max_recall_k = 50
+persist_on_recall = false</pre>
+          </div>
+          <div class="slide-foot"><span>部署变量与领域策略分开发布、分开治理</span></div>
+        </article>
+
+        <article class="slide">
+          <div class="slide-head"><div><p class="kicker">20 · Evaluation system</p><h2>从“测试通过”到“记忆正确”</h2><p class="slide-summary">每个 case 使用独立 scope，覆盖事实值、分区、类型、版本、证据引用、冲突动作、episode 命中和延迟门槛。</p></div><span class="slide-no">21</span></div>
+          <div class="grid-2">
+            <div class="metric-table">
+              <div class="th">METRIC</div><div class="th">GATE</div><div class="th">BASELINE</div>
+              <div>Case pass rate</div><div>1.0</div><div class="ok">1.000</div>
+              <div>Fact recall</div><div>1.0</div><div class="ok">1.000</div>
+              <div>Fact contract</div><div>1.0</div><div class="ok">1.000</div>
+              <div>Conflict expectation</div><div>1.0</div><div class="ok">1.000</div>
+              <div>Episode hit rate</div><div>1.0</div><div class="ok">1.000</div>
+              <div>Fact MRR</div><div>≥ .8</div><div class="ok">0.929</div>
+              <div>Episode MRR</div><div>≥ .8</div><div class="ok">1.000</div>
+              <div>P95 recall</div><div>≤ 80ms</div><div class="ok">&lt; 1ms*</div>
+            </div>
+            <div class="score-card"><span class="mono small">CORE DATASET</span><strong>14 / 14</strong><h3>场景通过</h3><p>偏好与流程分区、跨语言查询、时序版本、冲突审计、证据追溯、重复写入与精确事实召回。</p></div>
+          </div>
+          <div class="pipeline"><div class="pipe-node">JSONL DATASET</div><i class="pipe-arrow"></i><div class="pipe-node">ISOLATED RUN</div><i class="pipe-arrow"></i><div class="pipe-node">METRICS</div><i class="pipe-arrow"></i><div class="pipe-node">EXIT GATE</div></div>
+          <div class="slide-foot"><span>* 本地小数据集，只用于算法回归，不代表生产 SLO</span></div>
+        </article>
+
+        <article class="slide">
+          <div class="slide-head"><div><p class="kicker">20A · Eval coverage</p><h2>当前 14 个案例覆盖了什么</h2><p class="slide-summary">核心数据集不是只检查“有没有返回结果”，而是同时验证事实值、类型、分区、版本、证据数量、冲突动作、episode 命中和排序位置。</p></div><span class="slide-no">35</span></div>
+          <div class="truth-grid">
+            <div class="truth"><div class="truth-status">5 CASES</div><div class="truth-copy"><h3>偏好记忆</h3><p>language、editor、theme、response format、terminal；验证 preference 分区与类型。</p></div></div>
+            <div class="truth"><div class="truth-status">3 CASES</div><div class="truth-copy"><h3>程序记忆</h3><p>release、backup、incident workflow；验证 procedural 分区和流程召回。</p></div></div>
+            <div class="truth"><div class="truth-status">3 CASES</div><div class="truth-copy"><h3>语义事实</h3><p>delivery deadline、team owner、API contract；验证精确 key/value 和跨语言查询。</p></div></div>
+            <div class="truth"><div class="truth-status partial">3 CASES</div><div class="truth-copy"><h3>时序更新</h3><p>device.os、location.city、job.title；要求最新值、version ≥ 2 和 archive 冲突日志。</p></div></div>
+            <div class="truth"><div class="truth-status partial">CROSS</div><div class="truth-copy"><h3>幂等与证据</h3><p>重复偏好写入不生成重复事实，所有预期事实至少保留一个 evidence_id。</p></div></div>
+            <div class="truth"><div class="truth-status warn">RANK</div><div class="truth-copy"><h3>召回与延迟</h3><p>每例检查 episode term、fact/episode MRR，并汇总本地 P95 recall latency。</p></div></div>
+          </div>
+          <div class="slide-foot"><span>覆盖的是记忆语义契约，不只是函数返回码</span></div>
+        </article>
+
+        <article class="slide data-transform-slide">
+          <div class="slide-head"><div><p class="kicker">20B · Eval case anatomy</p><h2>示例：时序更新案例如何判定通过</h2><p class="slide-summary">temporal-update 连续写入 iOS 与 Android，预期旧版本被归档、新版本成为当前事实，同时仍能召回 Android 对应的 episode。</p></div><span class="slide-no">36</span></div>
+          <div class="transform-flow" aria-label="时序更新评测案例执行流程">
+            <section class="transform-card">
+              <span class="transform-step">01 · CASE</span><h3>EvalCase</h3>
+              <div class="data-shape"><span>case_id: temporal-update</span><span>memories: [device.os=iOS,</span><span> device.os=Android]</span><span>query: "current device os Android"</span></div>
+              <div class="transform-op"><b>EXPECT</b>fact Android、semantic 分区、version≥2、archive/temporal 冲突、episode 含 Android。</div>
+            </section>
+            <section class="transform-card">
+              <span class="transform-step">02 · WRITE</span><h3>Isolated Scope</h3>
+              <div class="data-shape"><span>scope: eval-temporal-update</span><span>session: session-temporal-update</span><span>L2 evidence: mem-ios, mem-android</span><span>Inbox: 2 pending items</span></div>
+              <div class="transform-op"><b>OBSERVE</b>每条 memory 使用固定递增时间戳，保证时序判断可重复。</div>
+            </section>
+            <section class="transform-card">
+              <span class="transform-step">03 · CONSOLIDATE</span><h3>Version Chain</h3>
+              <div class="data-shape"><span>v1: value=iOS, valid_until=t2</span><span>v2: value=Android, active</span><span>ConflictRecord.type=temporal</span><span>action=archive · resolved_to=Android</span></div>
+              <div class="transform-op"><b>ASSERT STATE</b>force reflect 后要求 failed=0 且 inbox_remaining=0。</div>
+            </section>
+            <section class="transform-card">
+              <span class="transform-step">04 · RECALL</span><h3>Observed Result</h3>
+              <div class="data-shape"><span>facts[rank].value == Android</span><span>partition == semantic</span><span>version >= 2</span><span>episodes[*].text contains Android</span></div>
+              <div class="transform-op"><b>MEASURE</b>记录 fact hit、contract hit、conflict hit、episode hit、MRR 和 recall latency。</div>
+            </section>
+            <section class="transform-card">
+              <span class="transform-step">05 · RESULT</span><h3>EvalCaseResult</h3>
+              <div class="data-shape"><span>passed: all assertions true</span><span>fact_mrr · episode_mrr</span><span>consolidation_ok: true</span><span>diagnostics: facts/episodes/conflicts</span></div>
+              <div class="transform-op"><b>AGGREGATE</b>进入 suite 指标；任一契约、冲突或 episode 断言失败都会降低门禁指标。</div>
+            </section>
+          </div>
+          <div class="transform-rules">
+            <div class="transform-rule"><b>值正确</b>不仅命中 device.os，还必须返回最新值 Android。</div>
+            <div class="transform-rule"><b>历史正确</b>版本至少为 2，冲突日志必须是 temporal + archive。</div>
+            <div class="transform-rule"><b>证据正确</b>事实结构和 episode 命中同时通过，防止只写事实但丢失来源。</div>
+          </div>
+          <div class="slide-foot"><span>一个案例同时验证写入、固化、版本、审计、召回与排名</span></div>
+        </article>
+
+        <article class="slide eval-expansion-slide">
+          <div class="slide-head"><div><p class="kicker">20C · Eval expansion</p><h2>下一阶段 Evals：从规则回归走向生产认证</h2><p class="slide-summary">当前 14 case 适合确定性语义回归，但不能覆盖真实模型、百万级索引、分布式故障和安全边界。后续评测必须分层建设，不能用单一通过率代替。</p></div><span class="slide-no">37</span></div>
+          <div class="example-grid-4">
+            <section class="type-card" data-type="PLANNED · MODEL QUALITY"><h3>模型决策 Eval</h3><ul><li>Schema 合规率与字段越权率</li><li>抽取 precision / recall / F1</li><li>规则 fallback 与超时率</li><li>prompt/model hash、token、成本</li><li>golden + shadow 对照</li></ul></section>
+            <section class="type-card" data-type="PLANNED · SCALE"><h3>规模与性能 Eval</h3><ul><li>1k / 10k / 100k / 1m 数据桶</li><li>Recall@K、MRR、NDCG</li><li>P50 / P95 / P99 延迟</li><li>索引内存、写放大、回填耗时</li><li>24h 长稳与容量拐点</li></ul></section>
+            <section class="type-card" data-type="PLANNED · RELIABILITY"><h3>故障恢复 Eval</h3><ul><li>worker commit 前后崩溃</li><li>lease 到期、重复消费、DLQ replay</li><li>PG 成功 / Neo4j 失败补投</li><li>Redis/PG/Neo4j 分区与恢复</li><li>多实例读一致性窗口</li></ul></section>
+            <section class="type-card" data-type="PLANNED · SAFETY"><h3>隐私与隔离 Eval</h3><ul><li>scope 间零数据泄漏</li><li>API key 不进入日志和快照</li><li>恶意记忆指令与 prompt injection</li><li>hard forget 级联验证</li><li>PII 删除与审计可追踪</li></ul></section>
+          </div>
+          <div class="slide-foot"><span>规则语义、模型质量、规模性能、故障恢复与安全必须分别设门禁</span></div>
+        </article>
+
+        <article class="slide">
+          <div class="slide-head"><div><p class="kicker">21 · Reality check</p><h2>接口存在，不等于能力已接通</h2><p class="slide-summary">状态只依据真实调用链和可执行验证：READY 可在当前仓库复现，PARTIAL 表示边界已存在但主路径未闭合，GAP 表示尚无生产语义。</p></div><span class="slide-no">22</span></div>
+          <div class="truth-grid">
+            <div class="truth"><div class="truth-status">READY</div><div class="truth-copy"><h3>L0—L4 / 召回 / 冲突</h3><p>核心内存路径可运行、可测试、可持久化。</p></div></div>
+            <div class="truth"><div class="truth-status">READY</div><div class="truth-copy"><h3>.env 与离线 Evals</h3><p>配置隔离、指标、门槛、JSON 报告与 CLI 已落地。</p></div></div>
+            <div class="truth"><div class="truth-status partial">PARTIAL</div><div class="truth-copy"><h3>LLM 固化</h3><p>Gateway Port 已有；ConsolidationAgent 尚未调用，仍是规则抽取。</p></div></div>
+            <div class="truth"><div class="truth-status partial">PARTIAL</div><div class="truth-copy"><h3>生产 Embedding</h3><p>统一入口已覆盖写入、查询与恢复；版本双写、回填和读 alias 尚未实现。</p></div></div>
+            <div class="truth"><div class="truth-status warn">GAP</div><div class="truth-copy"><h3>可靠队列与多实例</h3><p>缺 lease、DLQ、远程权威读和跨存储补偿。</p></div></div>
+            <div class="truth"><div class="truth-status warn">GAP</div><div class="truth-copy"><h3>在线模型 Eval</h3><p>尚未覆盖模型漂移、Schema 稳定性、token 与成本。</p></div></div>
+          </div>
+          <div class="slide-foot"><span>生产模式当前是外部依赖骨架，不是完整生产认证</span></div>
+        </article>
+
+        <article class="slide">
+          <div class="slide-head"><div><p class="kicker">22 · Delivery roadmap</p><h2>先闭合语义，再扩大规模</h2></div><span class="slide-no">23</span></div>
+          <div class="roadmap">
+            <div class="road"><span>MX-101 · P1</span><h3>LLM 固化</h3><p>Schema decision、冲突闸门、规则 fallback。</p></div>
+            <div class="road"><span>MX-102 · P1</span><h3>生产向量</h3><p>版本、维度、双写、回填、shadow 与回滚。</p></div>
+            <div class="road"><span>MX-103 · P1</span><h3>可靠 Inbox</h3><p>claim、lease、retry、DLQ、幂等恢复。</p></div>
+            <div class="road"><span>MX-104 · P1</span><h3>远程权威</h3><p>多实例一致性、outbox 与跨存储补偿。</p></div>
+            <div class="road"><span>MX-201 · P2</span><h3>模型 Eval</h3><p>golden、shadow、prompt/model hash、成本门禁。</p></div>
+            <div class="road"><span>MX-202 · P2</span><h3>规模化</h3><p>1k—1m 数据桶、P99、容量、长稳和成本。</p></div>
+          </div>
+          <div class="grid-3">
+            <div class="panel blue"><div class="big-stat">3</div><h3>本轮已完成</h3><p>.env、文档架构、核心 evals。</p></div>
+            <div class="panel red"><div class="big-stat">4</div><h3>P1 收敛项</h3><p>模型、向量、队列、生产一致性。</p></div>
+            <div class="panel green"><div class="big-stat">2</div><h3>P2 扩展项</h3><p>在线模型质量与规模化治理。</p></div>
+          </div>
+          <div class="slide-foot"><span>唯一状态源：plans/00-platform-master-plan.md</span></div>
+        </article>
+
+        <article class="slide">
+          <div class="slide-head"><div><p class="kicker">23 · Delivery package</p><h2>现在拥有一套可执行基线</h2></div><span class="slide-no">24</span></div>
+          <div class="closing">
+            <div>
+              <p class="lead">架构不再只是一份愿景文档：配置、代码边界、质量数据、发布门槛与后续任务已连成闭环。</p>
+              <div class="artifact-list">
+                <div class="artifact">docs/architecture/*<br>分类 · 数据结构 · 固化 · 检索 · ADR</div>
+                <div class="artifact">src/mem/evals/*<br>dataset · metric · threshold · report</div>
+                <div class="artifact">.env / .env.example<br>model-only configuration</div>
+                <div class="artifact">plans/*<br>3 completed · 1 in progress · 5 planned</div>
+              </div>
+              <pre class="code-sheet" style="margin-top:10px">uv run ruff check src/mem tests examples scripts
+uv run pytest
+uv run mem-eval --fail-on-regression
+uv run python scripts/run_e2e_memory_flow.py --cleanup</pre>
+            </div>
+            <div class="stamp">EVIDENCE<br>BEFORE<br>CLAIMS</div>
+          </div>
+          <div class="slide-foot"><span>MemX · architecture baseline</span></div>
+        </article>
+      </div>
+    </section>
+    <div class="nav-dock">
+      <nav class="toolbar" aria-label="幻灯片导航">
+        <button class="icon-btn" id="prev" type="button" aria-label="上一页" title="上一页">←</button>
+        <div class="counter" id="counter">01 / 43</div>
+        <div class="dots" id="dots" aria-label="页码"></div>
+        <button class="icon-btn" id="next" type="button" aria-label="下一页" title="下一页">→</button>
+        <button class="icon-btn" id="fullscreen" type="button" aria-label="全屏" title="全屏">⛶</button>
+      </nav>
+    </div>
+  </main>
+  <script>
+    (() => {
+      const slides = [...document.querySelectorAll('.slide')];
+      const dots = document.getElementById('dots');
+      const counter = document.getElementById('counter');
+      const progress = document.getElementById('progress');
+      const prev = document.getElementById('prev');
+      const next = document.getElementById('next');
+      const fullscreen = document.getElementById('fullscreen');
+      let index = 0;
+      let touchStart = 0;
+
+      slides.forEach((slide, slideIndex) => {
+        const slideNumber = slide.querySelector('.slide-no');
+        if (slideNumber) {
+          slideNumber.textContent = String(slideIndex + 1).padStart(2, '0')
+            + ' / '
+            + String(slides.length).padStart(2, '0');
+        }
+        const dot = document.createElement('button');
+        dot.type = 'button';
+        dot.className = 'dot';
+        dot.setAttribute('aria-label', '第 ' + (slideIndex + 1) + ' 页');
+        dot.addEventListener('click', () => show(slideIndex));
+        dots.appendChild(dot);
+      });
+
+      function show(nextIndex) {
+        index = Math.max(0, Math.min(slides.length - 1, nextIndex));
+        slides.forEach((slide, slideIndex) => {
+          slide.classList.toggle('active', slideIndex === index);
+          slide.classList.toggle('before', slideIndex < index);
+          slide.setAttribute('aria-hidden', slideIndex === index ? 'false' : 'true');
+        });
+        [...dots.children].forEach((dot, dotIndex) => {
+          const isActive = dotIndex === index;
+          dot.classList.toggle('active', isActive);
+          if (isActive) dot.setAttribute('aria-current', 'page');
+          else dot.removeAttribute('aria-current');
+        });
+        counter.textContent = String(index + 1).padStart(2, '0') + ' / ' + String(slides.length).padStart(2, '0');
+        progress.style.width = ((index + 1) / slides.length * 100) + '%';
+        prev.disabled = index === 0;
+        next.disabled = index === slides.length - 1;
+        history.replaceState(null, '', '#slide-' + (index + 1));
+      }
+
+      prev.addEventListener('click', () => show(index - 1));
+      next.addEventListener('click', () => show(index + 1));
+      fullscreen.addEventListener('click', () => {
+        if (!document.fullscreenElement) document.documentElement.requestFullscreen?.();
+        else document.exitFullscreen?.();
+      });
+      document.addEventListener('fullscreenchange', () => {
+        const isFullscreen = Boolean(document.fullscreenElement);
+        fullscreen.setAttribute('aria-label', isFullscreen ? '退出全屏' : '全屏');
+        fullscreen.title = isFullscreen ? '退出全屏' : '全屏';
+        fullscreen.textContent = isFullscreen ? '×' : '⛶';
+      });
+      document.addEventListener('keydown', (event) => {
+        if (['ArrowRight', 'ArrowDown', 'PageDown', ' '].includes(event.key)) { event.preventDefault(); show(index + 1); }
+        if (['ArrowLeft', 'ArrowUp', 'PageUp'].includes(event.key)) { event.preventDefault(); show(index - 1); }
+        if (event.key === 'Home') show(0);
+        if (event.key === 'End') show(slides.length - 1);
+      });
+      document.getElementById('deck').addEventListener('touchstart', event => { touchStart = event.changedTouches[0].clientX; }, { passive: true });
+      document.getElementById('deck').addEventListener('touchend', event => {
+        const delta = event.changedTouches[0].clientX - touchStart;
+        if (Math.abs(delta) > 45) show(index + (delta < 0 ? 1 : -1));
+      }, { passive: true });
+      const requested = Number(location.hash.replace('#slide-', ''));
+      show(Number.isFinite(requested) && requested > 0 ? requested - 1 : 0);
+    })();
+  </script>
+</body>
+</html>
