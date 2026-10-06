@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import urllib.error
 import urllib.request
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set
 
 from ..config.settings import MemoryConfig
 from ..exceptions import BackendDependencyError
@@ -607,6 +607,71 @@ class Neo4jBackedCognitiveGraph(CognitiveGraph):
         )
         self._merge_snapshot(scope_id)
         return node
+
+    def mark_evidence_stale(self, scope_id: str, evidence_ids: List[str]) -> int:
+        """Supersede insights locally and propagate the status to Neo4j.
+
+        基类只改内存状态，不写穿。缺失这个 override 时Neo4j 侧的 n.status 会
+        永远停在写入那一刻的值——级联失效在生产模式下静默失效，且更难察觉，
+        因为本地查询是对的。
+
+        输入:
+            scope_id: 作用域 ID。
+            evidence_ids: 已被替换或失效的证据 ID。
+        输出:
+            int: 本次新变为 superseded 的节点数。
+        示例:
+            示例输入: adapter.mark_evidence_stale("t1", ["m1"])
+            示例输出: 1
+        """
+        changed = super().mark_evidence_stale(scope_id, evidence_ids)
+        self._merge_snapshot(scope_id)
+        return changed
+
+    def prune(self, scope_id: str) -> int:
+        """Prune locally and drop the removed nodes from Neo4j.
+
+        基类只删内存节点。MERGE 语义不会删除 Neo4j 中已不存在的节点，
+        被剪枝的低价值洞察会在图数据库里永久残留。
+
+        输入:
+            scope_id: 作用域 ID。
+        输出:
+            int: 被剪枝节点数。
+        示例:
+            示例输入: adapter.prune("t1")
+            示例输出: 0
+        """
+        before = {node.node_id for node in self.all_nodes(scope_id)}
+        removed = super().prune(scope_id)
+        if removed:
+            stale_ids = before - {node.node_id for node in self.all_nodes(scope_id)}
+            self._delete_nodes(scope_id, stale_ids)
+        return removed
+
+    def _delete_nodes(self, scope_id: str, node_ids: Set[str]) -> None:
+        """Delete pruned nodes from Neo4j.
+
+        输入:
+            scope_id: 作用域 ID。
+            node_ids: 需要删除的节点 ID 集合。
+        输出:
+            None。
+        示例:
+            示例输入: adapter._delete_nodes("t1", {"n1"})
+            示例输出: 对应节点及其关系从 Neo4j 移除。
+        """
+        if not node_ids:
+            return
+        with self.driver.session() as session:
+            session.run(
+                """
+                MATCH (n:MemNode)
+                WHERE n.scope_id = $scope_id AND n.id IN $node_ids
+                DETACH DELETE n
+                """,
+                {"scope_id": scope_id, "node_ids": sorted(node_ids)},
+            )
 
     def _merge_snapshot(self, scope_id: str) -> None:
         """Merge the current scope graph snapshot into Neo4j.

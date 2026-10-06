@@ -12,7 +12,9 @@ import pytest
 from mem import AgentMemory, MemoryConfig, build_memory_backend
 from mem.adapters import NoopLLMGateway
 from mem.adapters import production as prod
-from mem.memory.models import EpisodicMemory, MemoryType
+from mem.memory.models import EpisodicMemory, MemoryType, NodeType
+from mem.retrieval import candidate_limit_for
+from mem.retrieval.pipeline import _route_limit
 
 
 def test_in_memory_backend_bundle_can_be_injected_without_flush() -> None:
@@ -240,6 +242,110 @@ def test_production_write_through_adapters_delegate_to_clients() -> None:
 
     assert node.label == "Agent memory"
     assert session.run.call_count >= 2
+
+
+def test_neo4j_graph_propagates_status_and_prunes() -> None:
+    """Verify the Neo4j write-through adapter syncs status and deletions.
+
+    基类只改内存状态，而 _merge_snapshot 仅在 add_insight 中调用。缺失 override
+    时 Neo4j 侧的 n.status 永远停在写入那一刻的值，级联失效在生产模式下静默
+    失效——本地查询正确，问题只在图数据库里，更难察觉。prune 同理：MERGE
+    语义不会删除已不存在的节点，被剪枝的洞察会永久残留在图数据库中。
+
+    输入:
+        无；用MagicMock 伪造 Neo4j driver。
+    输出:
+        None；断言 status 与 DETACH DELETE 均写穿。
+    示例:
+        示例输入: pytest tests/test_memory_adapters.py -k neo4j_graph_propagates
+        示例输出: Neo4j 写穿测试通过。
+    """
+    session = MagicMock()
+    session_context = MagicMock()
+    session_context.__enter__.return_value = session
+    driver = MagicMock()
+    driver.session.return_value = session_context
+
+    def merged_statuses() -> list:
+        return [
+            call.args[1]["status"]
+            for call in session.run.call_args_list
+            if "n.status = $status" in call.args[0]
+        ]
+
+    def delete_calls() -> list:
+        return [
+            call
+            for call in session.run.call_args_list
+            if "DETACH DELETE" in call.args[0]
+        ]
+
+    graph = prod.Neo4jBackedCognitiveGraph(MemoryConfig(), driver)
+    graph._upsert_node("t1", "洞察A", NodeType.INSIGHT, ["m1", "m2"], 0.9)
+
+    # 部分失效不得判死，且必须写穿 active。
+    session.reset_mock()
+    assert graph.mark_evidence_stale("t1", ["m1"]) == 0
+    assert merged_statuses() == ["active"]
+
+    # 全部失效才判死，且 status 必须落到 Neo4j。
+    session.reset_mock()
+    assert graph.mark_evidence_stale("t1", ["m2"]) == 1
+    assert merged_statuses() == ["superseded"]
+
+    # 复活路径同样写穿。
+    session.reset_mock()
+    graph.add_insight("t1", "洞察A", evidence_ids=["m9"], salience=0.9)
+    assert merged_statuses() == ["active"]
+
+    # 剪掉的节点必须 DETACH DELETE，否则图数据库永久残留。
+    pruning = prod.Neo4jBackedCognitiveGraph(
+        MemoryConfig(graph_salience_decay=0.99, graph_prune_threshold=0.95),
+        driver,
+    )
+    pruning.add_insight("t1", "将被剪枝", salience=0.01)
+    session.reset_mock()
+    assert pruning.prune("t1") == 1
+    assert pruning.all_nodes("t1") == []
+    calls = delete_calls()
+    assert len(calls) == 1
+    assert calls[0].args[1]["scope_id"] == "t1"
+    assert len(calls[0].args[1]["node_ids"]) == 1
+
+    # 无节点被剪掉时不得发出删除语句。
+    session.reset_mock()
+    assert pruning.prune("t1") == 0
+    assert delete_calls() == []
+
+
+def test_candidate_limit_is_shared_between_pool_and_pipeline() -> None:
+    """Verify both candidate ceilings honor the same hard limit.
+
+    候选上限此前在候选池与 pipeline._route_limit 各算一遍，后者不尊重
+    retrieval_candidate_hard_limit——上限的意义是给无界扫描封顶，两处不一致
+    等于有一条路径没有上限。
+
+    输入:
+        无；构造 k 与倍率使未截断值远超 hard_limit。
+    输出:
+        None；断言两处上限相等且不超过 hard_limit。
+    示例:
+        示例输入: pytest tests/test_memory_adapters.py -k candidate_limit_is_shared
+        示例输出: 候选上限一致性测试通过。
+    """
+    config = MemoryConfig(
+        max_recall_k=100_000,
+        retrieval_candidate_multiplier=50,
+        retrieval_candidate_hard_limit=100,
+    )
+    # 未截断时 k * multiplier * 4 = 20000，远超 hard_limit。
+    assert candidate_limit_for(100, config) == 100
+    assert _route_limit(record_count=50_000, k=100, config=config) == 100
+    # 两者必须完全一致，而不是「都还算合理」。
+    assert _route_limit(50_000, 100, config) == candidate_limit_for(100, config)
+    # 未触顶时仍按倍数放大。
+    assert candidate_limit_for(8, MemoryConfig()) == 64
+    assert candidate_limit_for(8, MemoryConfig(retrieval_candidate_multiplier=1)) == 32
 
 
 def test_build_production_backend_assembles_redacted_bundle(
