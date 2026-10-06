@@ -1,0 +1,11 @@
+{
+  "min_case_pass_rate": 1.0,
+  "min_fact_recall": 1.0,
+  "min_fact_contract_rate": 1.0,
+  "min_conflict_expectation_rate": 1.0,
+  "min_episode_hit_rate": 1.0,
+  "min_fact_mrr": 0.8,
+  "min_episode_mrr": 0.8,
+  "min_consolidation_success_rate": 1.0,
+  "max_p95_recall_latency_ms": 80.0
+}
