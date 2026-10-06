@@ -24,25 +24,40 @@ flowchart TB
 
 ## 配置示例
 
+模型参数放在项目根目录 `.env`：
+
+```dotenv
+MEMX_LLM_GATEWAY_URL=http://localhost:8080
+MEMX_LLM_API_KEY=replace-with-secret
+MEMX_LLM_MODEL=decision-model
+MEMX_EMBEDDING_BACKEND=gateway
+MEMX_EMBEDDING_MODEL=embedding-model
+MEMX_LLM_REQUEST_TIMEOUT_SECONDS=10
+```
+
+`MEMX_EMBEDDING_MODEL` 可以留空并由 Gateway 选择默认模型。项目不要求
+`OPENAI_EMBEDDING_MODEL`；Gateway 可接入 BGE、E5、Nomic 或其它兼容服务。
+
+存储连接和运行策略仍通过 `MemoryConfig` 或 `hms.json` 管理：
+
 ```python
-from mem import HumanMem, MemoryConfig
+from mem import HumanMem, load_memory_config
 
-config = MemoryConfig(
-    backend_mode="production",
-    persist_on_write=False,
-    persist_on_recall=False,
-    redis_url="redis://localhost:6379/0",
-    postgres_dsn="postgresql://user:password@localhost:5432/human_mem",
-    neo4j_uri="bolt://localhost:7687",
-    neo4j_user="neo4j",
-    neo4j_password="password",
-    llm_gateway_url="http://localhost:8080",
-    llm_api_key="token",
-)
-
+config = load_memory_config(overrides={
+    "backend_mode": "production",
+    "persist_on_write": False,
+    "persist_on_recall": False,
+    "redis_url": "redis://localhost:6379/0",
+    "postgres_dsn": "postgresql://user:password@localhost:5432/human_mem",
+    "neo4j_uri": "bolt://localhost:7687",
+    "neo4j_user": "neo4j",
+    "neo4j_password": "password",
+})
 memory = HumanMem(config)
 print(memory.memory.backend_diagnostics())
 ```
+
+实际部署建议由 Secret Manager 注入同名进程环境变量；进程环境会覆盖项目 `.env`。
 
 ## 关键依赖
 
@@ -112,6 +127,11 @@ def run_memory_maintenance(memory: HumanMem) -> dict:
 | `forget` | 每日、容量压力升高 | 执行动态遗忘、低置信清理和图谱剪枝 |
 
 `GET /health` 会返回调度任务状态和 embedding 状态，适合作为服务存活和基础依赖巡检入口。
+Gateway 返回的向量维度必须与 `embedding_dimensions` 一致；不一致会直接拒绝写入和查询，
+避免损坏 pgvector 索引。生产环境不执行静默本地 fallback；需要离线运行时必须显式设置
+`MEMX_EMBEDDING_BACKEND=local`。显式 local 模式可以不配置
+`MEMX_LLM_GATEWAY_URL`，系统会使用 `NoopLLMGateway`；`auto` 和 `gateway` 模式仍会在
+缺少 Gateway URL 时拒绝启动。
 
 ## 容量与性能参数
 
@@ -123,6 +143,7 @@ def run_memory_maintenance(memory: HumanMem) -> dict:
 | `consolidation_batch_size` | `50` | 后台 worker 可按吞吐调大 |
 | `inbox_max_retries` | `3` | 接入告警，避免失败任务静默堆积 |
 | `backend_connection_timeout_seconds` | `3.0` | 与服务启动超时策略保持一致 |
+| `llm_request_timeout_seconds` | `10.0` | 在 `.env` 中配置，限制单次 Gateway 请求 |
 
 ## 监控指标
 

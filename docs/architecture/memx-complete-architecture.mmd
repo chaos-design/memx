@@ -1,0 +1,163 @@
+flowchart TB
+    classDef current fill:#eef9ef,stroke:#171915,stroke-width:1px,color:#171915
+    classDef target fill:#fff1ee,stroke:#e8583f,stroke-width:1px,stroke-dasharray:5 3,color:#171915
+    classDef authority fill:#171915,stroke:#171915,color:#f3f0e8
+    classDef derived fill:#eef3ff,stroke:#2864dc,color:#171915
+    classDef control fill:#fff8d8,stroke:#c99b12,color:#171915
+
+    subgraph Clients["调用方"]
+        USER["User / Operator"]
+        AGENT["Agent Runtime"]
+        CLI["mem CLI"]
+        HTTP["HTTP Client"]
+    end
+
+    subgraph Entry["接口与编排"]
+        SDK["HumanMem SDK"]
+        API["FastAPI"]
+        SERVICE["AgentMemory"]
+        RECALL["RecallAgent"]
+        CONS["ConsolidationAgent"]
+        SCHED["MaintenanceTaskManager"]
+    end
+
+    subgraph Online["在线数据面 · bounded latency"]
+        OBSERVE["Observe / Memorize"]
+        PLAN["Recall Plan"]
+        CANDIDATE["Bounded Candidate Pool"]
+        DENSE["Dense Route"]
+        SPARSE["Sparse Route"]
+        GRAPH_ROUTE["Graph Route"]
+        RRF["RRF Fusion"]
+        F2["F2 Rerank"]
+        RESULT["Facts + Episodes + Subgraph"]
+    end
+
+    subgraph Evolution["异步演化面 · quality optimized"]
+        INBOX["Inbox"]
+        CLAIM["Claim + Lease"]
+        CONTEXT["Evidence Context<br/>budget + redaction"]
+        DECIDE["LLM JSON Decision"]
+        FALLBACK["Deterministic Fallback"]
+        SCHEMA["Schema + Confidence Gate"]
+        F5["F5 Conflict Gate"]
+        TX["Fact + Conflict + Outbox + Done"]
+        DLQ["Retry / DLQ / Replay"]
+        PROJECTOR["Graph Projector"]
+    end
+
+    subgraph Memory["L0-L4 记忆模型"]
+        L0["L0 Raw Observation"]
+        L1["L1 Working Memory"]
+        L2["L2 Episodic Evidence"]
+        L3S["L3 Semantic"]
+        L3P["L3 Preference"]
+        L3R["L3 Procedural"]
+        L4["L4 Cognitive Graph"]
+    end
+
+    subgraph Authority["目标权威存储"]
+        REDIS[("Redis<br/>L0 + queue + lease")]
+        PG[("PostgreSQL + pgvector<br/>L2 + L3 + conflicts + outbox")]
+        NEO[("Neo4j<br/>L4 derived view")]
+        SNAP[("Snapshot / checkpoint")]
+    end
+
+    subgraph External["模型与基础设施"]
+        LLM["LLM Gateway"]
+        EMBED["Embedding Model"]
+        SECRET["Secret Manager / .env"]
+    end
+
+    subgraph Control["控制面与质量闭环"]
+        CONFIG["Policy Config"]
+        HEALTH["Health + Diagnostics"]
+        OBS["Metrics + Traces + Cost"]
+        TEST["pytest + coverage"]
+        EVAL["Offline Eval<br/>14 core scenarios"]
+        SHADOW["Model Shadow Eval"]
+        RELEASE{"Release Gate"}
+        REPAIR["Audit + Repair"]
+    end
+
+    USER --> AGENT
+    AGENT --> SDK
+    CLI --> SERVICE
+    HTTP --> API --> SDK
+    SDK --> SERVICE
+    SCHED --> SERVICE
+    SERVICE --> CONS
+    SCHED --> CONS
+
+    SERVICE --> OBSERVE
+    OBSERVE --> L0
+    L0 -->|"compress threshold"| L1
+    L1 -->|"closed slot"| L2
+    OBSERVE -->|"explicit memory"| L2
+    L2 --> INBOX
+    CONS --> INBOX
+
+    SERVICE --> RECALL --> PLAN
+    PLAN --> CANDIDATE
+    L2 --> CANDIDATE
+    CANDIDATE --> DENSE
+    CANDIDATE --> SPARSE
+    PLAN --> GRAPH_ROUTE
+    L4 --> GRAPH_ROUTE
+    DENSE --> RRF
+    SPARSE --> RRF
+    RRF --> F2
+    L3P --> RESULT
+    L3S --> RESULT
+    L3R --> RESULT
+    F2 --> RESULT
+    GRAPH_ROUTE --> RESULT
+    RESULT --> AGENT
+
+    INBOX -.-> CLAIM
+    CLAIM --> CONTEXT
+    CONTEXT --> DECIDE
+    DECIDE --> LLM
+    LLM --> SCHEMA
+    SCHEMA -->|"valid"| F5
+    SCHEMA -->|"timeout / invalid"| FALLBACK --> F5
+    F5 -->|"semantic"| L3S
+    F5 -->|"preference"| L3P
+    F5 -->|"procedural"| L3R
+    F5 --> TX
+    CLAIM -->|"retryable failure"| DLQ --> CLAIM
+    TX --> PROJECTOR --> L4
+
+    L0 --> REDIS
+    INBOX --> REDIS
+    L2 --> PG
+    L3S --> PG
+    L3P --> PG
+    L3R --> PG
+    TX --> PG
+    L4 --> NEO
+    SERVICE --> SNAP
+    PG -.->|"outbox replay"| PROJECTOR
+    SNAP -.->|"hydrate / repair"| SERVICE
+
+    SECRET --> LLM
+    SECRET --> EMBED
+    EMBED --> DENSE
+    EMBED --> L2
+    CONFIG --> SERVICE
+    CONFIG --> SCHED
+    SERVICE --> HEALTH
+    CLAIM --> OBS
+    PROJECTOR --> OBS
+    REPAIR --> PG
+    REPAIR --> NEO
+    TEST --> RELEASE
+    EVAL --> RELEASE
+    SHADOW -.-> RELEASE
+    RELEASE --> AGENT
+
+    class SDK,API,SERVICE,RECALL,CONS,SCHED,OBSERVE,PLAN,CANDIDATE,DENSE,SPARSE,GRAPH_ROUTE,RRF,F2,RESULT,L0,L1,L2,L3S,L3P,L3R,INBOX,CONFIG,HEALTH,TEST,EVAL current
+    class CLAIM,CONTEXT,DECIDE,SCHEMA,DLQ,TX,PROJECTOR,SHADOW target
+    class REDIS,PG authority
+    class L4,NEO,SNAP derived
+    class OBS,RELEASE,REPAIR control

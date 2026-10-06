@@ -1,6 +1,8 @@
 # 配置参考
 
-`MemoryConfig` 是 `memx` 的统一配置入口。配置可以分为后端、写入压缩、召回排序、遗忘治理、图谱、固化、持久化七类。推荐入口 `HumanMem` 会统一映射到内部 scope `human_mem_project`，业务侧不需要配置作用域维度。
+`MemoryConfig` 是 `memx` 的统一配置入口。非模型策略保存在 `hms.json`，模型接入参数
+只从项目根目录 `.env`、进程环境变量或显式 overrides 加载。推荐入口 `HumanMem` 会
+统一映射到内部 scope `human_mem_project`，业务侧不需要配置作用域维度。
 
 ## 配置分组
 
@@ -26,9 +28,37 @@ flowchart TB
 | `neo4j_uri` | `None` | 生产 Neo4j URI |
 | `neo4j_user` | `None` | Neo4j 用户名 |
 | `neo4j_password` | `None` | Neo4j 密码 |
-| `llm_gateway_url` | `None` | HTTP LLM Gateway 地址 |
-| `llm_api_key` | `None` | LLM Gateway 鉴权 token |
 | `backend_connection_timeout_seconds` | `3.0` | 外部依赖连接超时时间 |
+
+## 模型环境配置
+
+模型变量集中在项目根目录 `.env`。`.env` 已被 Git 忽略，`.env.example` 是无密钥模板。
+
+| 环境变量 | MemoryConfig 字段 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `MEMX_LLM_GATEWAY_URL` | `llm_gateway_url` | `None` | HTTP LLM Gateway 地址 |
+| `MEMX_LLM_API_KEY` | `llm_api_key` | `None` | Bearer token，输出时脱敏 |
+| `MEMX_LLM_MODEL` | `llm_model` | `None` | 结构化决策模型，为空时由 Gateway 选择 |
+| `MEMX_EMBEDDING_BACKEND` | `embedding_backend` | `auto` | `auto`、`local` 或 `gateway` |
+| `MEMX_EMBEDDING_MODEL` | `embedding_model` | `None` | embedding 模型，为空时由 Gateway 选择 |
+| `MEMX_LLM_REQUEST_TIMEOUT_SECONDS` | `llm_request_timeout_seconds` | `10.0` | 单次模型请求超时 |
+
+加载优先级：显式 overrides > 进程环境 > `.env` > 默认值。`hms.json` 中遗留的模型
+字段会被忽略，并在下一次配置写入时清理。`mem config set` 和 HTTP `PATCH /config`
+会拒绝写入模型字段，避免密钥进入持久化配置。
+
+### Embedding 后端选择
+
+- `auto`: `memory` 模式使用内置 deterministic embedding，`production` 模式使用
+  HTTP Gateway。
+- `local`: 始终使用内置 token-hash 向量，不要求 OpenAI 配置或网络，适合开发、测试和
+  明确的离线降级；即使使用 production 存储 Adapter，也不强制要求 LLM Gateway URL。
+- `gateway`: L2/L3 写入、查询、快照恢复和检索诊断统一调用 HTTP Gateway。
+
+项目不读取 `OPENAI_EMBEDDING_MODEL`。需要指定模型时使用
+`MEMX_EMBEDDING_MODEL`；不指定时 Gateway 可以选择自己的默认模型。非 OpenAI 模型也
+可以使用，只要 Gateway 的 `/embed` 契约兼容。远程向量长度必须等于
+`embedding_dimensions`，不匹配时系统会 fail fast，且不会静默混入本地向量。
 
 ## 写入与压缩
 

@@ -18,6 +18,7 @@ L0-L4 记忆分层、写入/读取/演化三条链路和 Port/Adapter 解耦架�
 ```text
 memx/
 ├── docs/                 # 架构和流程文档
+├── evals/                # 记忆质量数据集与发布门槛
 ├── examples/             # 可运行示例
 ├── scripts/              # 项目级工具脚本
 ├── src/mem/               # 核心 Python 包
@@ -52,6 +53,27 @@ uv sync --dev
 ```bash
 uv pip install -e .
 ```
+
+## 模型配置
+
+项目根目录 `.env` 统一保存 LLM Gateway、模型名和请求超时；`.env.example` 提供无密钥
+模板。进程环境变量优先于 `.env`，模型字段不会写入 `hms.json` 或配置 API。
+
+```dotenv
+MEMX_LLM_GATEWAY_URL=http://localhost:8080
+MEMX_LLM_API_KEY=
+MEMX_LLM_MODEL=
+MEMX_EMBEDDING_BACKEND=auto
+MEMX_EMBEDDING_MODEL=
+MEMX_LLM_REQUEST_TIMEOUT_SECONDS=10
+```
+
+项目不依赖 `OPENAI_EMBEDDING_MODEL`。默认 `auto` 在本地 `memory` 模式使用内置
+deterministic embedding，在 `production` 模式使用 HTTP Gateway。没有 OpenAI
+embedding 服务时，可显式设置 `MEMX_EMBEDDING_BACKEND=local`；该模式适合开发和测试，
+生产语义检索建议通过 Gateway 接入 BGE、E5、Nomic 或其它兼容模型。
+
+算法阈值、存储连接和持久化策略继续由 `MemoryConfig` / `hms.json` 管理。
 
 ## 快速开始
 
@@ -115,6 +137,7 @@ uv run mem --memory-dir .memories/ingest-demo ingest \
 ```bash
 uv run ruff check src/mem tests examples scripts
 uv run pytest
+uv run mem-eval --fail-on-regression
 uv run python scripts/run_memory_tests.py --skip-install
 ```
 
@@ -123,6 +146,10 @@ uv run python scripts/run_memory_tests.py --skip-install
 ## 文档
 
 - [文档索引](docs/index.md)
+- [完整使用指南](docs/usage.md)
+- [架构文档](docs/architecture/README.md)
+- [架构验证与证据矩阵](docs/architecture/verification.md)
+- [架构 HTML Slider](docs/architecture-slider.html)
 - [Agent 记忆系统整体流程](docs/agent-memory-flow.md)
 - [能力矩阵](docs/capability-matrix.md)
 - [API 参考](docs/api-reference.md)
@@ -132,6 +159,7 @@ uv run python scripts/run_memory_tests.py --skip-install
 - [配置参考](docs/configuration-reference.md)
 - [生产部署](docs/production-deployment.md)
 - [存储与 Schema](docs/storage-schema.md)
+- [评测体系](docs/evals.md)
 
 ## 许可证
 
