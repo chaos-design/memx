@@ -43,7 +43,9 @@ class HttpLLMGateway:
             raise ValueError(msg)
         self.base_url = config.llm_gateway_url.rstrip("/")
         self.api_key = config.llm_api_key
-        self.timeout = config.backend_connection_timeout_seconds
+        self.llm_model = config.llm_model
+        self.embedding_model = config.embedding_model
+        self.timeout = config.llm_request_timeout_seconds
 
     def decide_json(self, prompt: str, schema: Dict[str, Any]) -> Dict[str, Any]:
         """Call the gateway JSON decision endpoint.
@@ -58,6 +60,8 @@ class HttpLLMGateway:
             示例输出: {"op": "new", "mem_type": "semantic", ...}
         """
         payload = {"prompt": prompt, "schema": schema}
+        if self.llm_model:
+            payload["model"] = self.llm_model
         return self._post_json("/decide_json", payload)
 
     def embed(self, text: str) -> List[float]:
@@ -71,7 +75,10 @@ class HttpLLMGateway:
             示例输入: gateway.embed("Agent memory")
             示例输出: [0.1, 0.2, ...]
         """
-        payload = self._post_json("/embed", {"text": text})
+        request_payload = {"text": text}
+        if self.embedding_model:
+            request_payload["model"] = self.embedding_model
+        payload = self._post_json("/embed", request_payload)
         embedding = payload.get("embedding", [])
         return [float(item) for item in embedding]
 
