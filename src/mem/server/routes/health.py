@@ -7,7 +7,6 @@ from typing import Any, Dict
 from fastapi import APIRouter, Request
 
 from ...api import HumanMem
-from ...embedding.vector import embed_text
 from ..dependencies import memory_from_request
 from .paths import HEALTH_PATH
 
@@ -35,7 +34,7 @@ def health(request: Request) -> Dict[str, Any]:
 
 
 def _embedding_status(memory: HumanMem) -> Dict[str, Any]:
-    """Return local embedding subsystem status.
+    """Return active embedding subsystem status.
 
     输入:
         memory: HumanMem instance.
@@ -45,11 +44,4 @@ def _embedding_status(memory: HumanMem) -> Dict[str, Any]:
         示例输入: _embedding_status(memory)
         示例输出: {"status": "ok", "provider": "deterministic_local", ...}
     """
-    dimensions = memory.memory.config.embedding_dimensions
-    vector = embed_text("healthcheck", dimensions)
-    return {
-        "status": "ok",
-        "provider": "deterministic_local",
-        "dimensions": dimensions,
-        "vector_dimensions": len(vector),
-    }
+    return memory.memory.backend.embedding_runtime.diagnostics()

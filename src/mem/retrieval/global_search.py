@@ -7,6 +7,7 @@ import time
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Set
 
 from ..config.settings import MemoryConfig
+from ..embedding.provider import Embedder
 from ..embedding.scoring import f2_score
 from ..embedding.vector import cosine_similarity, embed_text, tokenize
 from ..memory.models import EpisodicMemory, MemoryStatus, MemoryType
@@ -37,12 +38,14 @@ KEYWORD_FALLBACK_ENGINE = "keyword_fallback"
 def records_from_snapshot_state(
     state: Mapping[str, Any],
     config: MemoryConfig,
+    embedder: Embedder = embed_text,
 ) -> List[EpisodicMemory]:
     """Build L2 records from a persisted scope snapshot.
 
     输入:
         state: `memory-state.json` 解析后的 scope snapshot。
         config: 当前 MemoryConfig。
+        embedder: 当前运行时统一向量函数。
     输出:
         list[EpisodicMemory]: 恢复出的 L2 记录。
     示例:
@@ -53,7 +56,7 @@ def records_from_snapshot_state(
     records = []
     for item in state.get("l2", []):
         if isinstance(item, Mapping):
-            records.append(record_from_snapshot(item, config, scope_id))
+            records.append(record_from_snapshot(item, config, scope_id, embedder))
     return records
 
 
@@ -61,6 +64,7 @@ def record_from_snapshot(
     item: Mapping[str, Any],
     config: MemoryConfig,
     default_scope_id: str,
+    embedder: Embedder = embed_text,
 ) -> EpisodicMemory:
     """Build an L2 record from persisted JSON fields.
 
@@ -68,6 +72,7 @@ def record_from_snapshot(
         item: `EpisodicMemory.to_dict()` 风格的 JSON 字段。
         config: 当前 MemoryConfig。
         default_scope_id: 缺省 scope_id。
+        embedder: 当前运行时统一向量函数。
     输出:
         EpisodicMemory: 可用于检索评分的记录。
     示例:
@@ -77,7 +82,7 @@ def record_from_snapshot(
     text = str(item.get("text", ""))
     return EpisodicMemory(
         mem_id=str(item.get("mem_id", "")),
-        embedding=embed_text(text, config.embedding_dimensions),
+        embedding=embedder(text, config.embedding_dimensions),
         text=text,
         importance=int(item.get("importance", 5)),
         ts_create=float(item.get("ts_create", 0.0)),
@@ -102,6 +107,7 @@ def fts5_global_semantic_search(
     graph_nodes: Optional[Sequence[Any]] = None,
     graph_edges: Optional[Sequence[Any]] = None,
     enable_cross_encoder: bool = True,
+    embedder: Embedder = embed_text,
 ) -> Dict[str, Any]:
     """Run hybrid global search with vector, keyword, and graph routes.
 
@@ -116,6 +122,7 @@ def fts5_global_semantic_search(
         graph_nodes: 可选序列化图谱节点。
         graph_edges: 可选序列化图谱边。
         enable_cross_encoder: 是否启用可插拔重排序。
+        embedder: 当前运行时统一向量函数。
     输出:
         dict: hybrid_rrf engine、results、related 与候选统计。
     示例:
@@ -130,6 +137,7 @@ def fts5_global_semantic_search(
             LocalGraphRetriever(graph=graph, nodes=graph_nodes, edges=graph_edges),
         ],
         reranker=DeterministicCrossEncoderReranker(),
+        embedder=embedder,
     )
     return pipeline.search(
         records=records,
@@ -198,6 +206,7 @@ def relevance_diagnostics(
     include_archived: bool = False,
     mem_id: Optional[str] = None,
     now_ts: Optional[float] = None,
+    embedder: Embedder = embed_text,
 ) -> Dict[str, Any]:
     """Evaluate semantic relevance and threshold decisions.
 
@@ -209,6 +218,7 @@ def relevance_diagnostics(
         include_archived: 是否包含 archived 记录。
         mem_id: 可选指定记录 ID。
         now_ts: 当前时间戳；None 使用 time.time()。
+        embedder: 当前运行时统一向量函数。
     输出:
         dict: 每条记录的 dense、keyword、F2 和 threshold 结果。
     示例:
@@ -218,7 +228,7 @@ def relevance_diagnostics(
     if now_ts is None:
         now_ts = time.time()
     query_tokens = frozenset(tokenize(query))
-    query_embedding = embed_text(query, config.embedding_dimensions)
+    query_embedding = embedder(query, config.embedding_dimensions)
     candidates = _eligible_records(records, include_archived)
     if mem_id is not None:
         candidates = [memory for memory in candidates if memory.mem_id == mem_id]
@@ -259,6 +269,7 @@ def hybrid_rerank_diagnostics(
     k: int = 8,
     include_archived: bool = False,
     now_ts: Optional[float] = None,
+    embedder: Embedder = embed_text,
 ) -> Dict[str, Any]:
     """Inspect candidate pool, dense/sparse rankings, RRF, and final rerank.
 
@@ -269,6 +280,7 @@ def hybrid_rerank_diagnostics(
         k: 返回数量。
         include_archived: 是否包含 archived 记录。
         now_ts: 当前时间戳；None 使用 time.time()。
+        embedder: 当前运行时统一向量函数。
     输出:
         dict: candidate_source、dense_ranked、sparse_ranked、fused 与 final。
     示例:
@@ -286,7 +298,7 @@ def hybrid_rerank_diagnostics(
     }
     inverted_index = _inverted_index(token_index)
     query_tokens = frozenset(tokenize(query))
-    query_embedding = embed_text(query, config.embedding_dimensions)
+    query_embedding = embedder(query, config.embedding_dimensions)
     pool = build_candidate_pool(
         records=records_by_id,
         query_tokens=query_tokens,

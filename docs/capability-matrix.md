@@ -98,7 +98,8 @@ flowchart TB
 
 ## 能力边界
 
-- `memx` 当前不在在线召回关键路径中调用真实 LLM，默认使用确定性 `NoopLLMGateway` 与本地 embedding。
+- `memx` 当前不在在线召回关键路径中调用生成式 LLM。默认 memory 模式使用本地
+  deterministic embedding；production 模式可通过 `EmbeddingRuntime` 调用 HTTP Gateway。
 - `reflect()` 是固化动作，不等同于简单查询；生产环境建议通过 `MaintenanceTaskManager` 调度 `consolidate`，不要每次请求同步执行。
 - 推荐入口 `HumanMem` 不要求业务传入作用域信息，内部统一使用 `human_mem_project` scope。
 - `search()` 默认只查 active L2 记忆；需要事实、图谱和 archived 复活时应使用 `recall()`。

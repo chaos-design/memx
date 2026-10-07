@@ -199,7 +199,13 @@ def snapshot_records(context: CliContext, all_scopes: bool) -> List[EpisodicMemo
         return current_scope_records(context)
     records: List[EpisodicMemory] = []
     for state in iter_scope_states(context):
-        records.extend(records_from_snapshot_state(state, context.memory.config))
+        records.extend(
+            records_from_snapshot_state(
+                state,
+                context.memory.config,
+                embedder=context.memory.l2.embedder,
+            )
+        )
     return records
 
 

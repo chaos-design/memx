@@ -8,6 +8,7 @@ import urllib.request
 from typing import Any, Dict, List, Optional, Set
 
 from ..config.settings import MemoryConfig
+from ..embedding.provider import Embedder, EmbeddingRuntime
 from ..exceptions import BackendDependencyError
 from ..graph.cognitive import CognitiveGraph
 from ..ingest.buffer import ConversationBuffer
@@ -15,9 +16,10 @@ from ..ingest.inbox import InMemoryInbox
 from ..ingest.working import WorkingMemoryManager
 from ..memory.episodic import EpisodicStore
 from ..memory.models import ConsolidationInboxItem, EpisodicMemory, MemoryType, Message
+from ..memory.ports import LLMGatewayPort
 from ..memory.semantic import SemanticStore
 from ..persistence.storage import MemoryFileStore
-from .memory import MemoryBackendBundle
+from .memory import MemoryBackendBundle, NoopLLMGateway
 
 
 class ProductionDependencyError(BackendDependencyError):
@@ -43,7 +45,9 @@ class HttpLLMGateway:
             raise ValueError(msg)
         self.base_url = config.llm_gateway_url.rstrip("/")
         self.api_key = config.llm_api_key
-        self.timeout = config.backend_connection_timeout_seconds
+        self.llm_model = config.llm_model
+        self.embedding_model = config.embedding_model
+        self.timeout = config.llm_request_timeout_seconds
 
     def decide_json(self, prompt: str, schema: Dict[str, Any]) -> Dict[str, Any]:
         """Call the gateway JSON decision endpoint.
@@ -58,6 +62,8 @@ class HttpLLMGateway:
             示例输出: {"op": "new", "mem_type": "semantic", ...}
         """
         payload = {"prompt": prompt, "schema": schema}
+        if self.llm_model:
+            payload["model"] = self.llm_model
         return self._post_json("/decide_json", payload)
 
     def embed(self, text: str) -> List[float]:
@@ -71,7 +77,10 @@ class HttpLLMGateway:
             示例输入: gateway.embed("Agent memory")
             示例输出: [0.1, 0.2, ...]
         """
-        payload = self._post_json("/embed", {"text": text})
+        request_payload = {"text": text}
+        if self.embedding_model:
+            request_payload["model"] = self.embedding_model
+        payload = self._post_json("/embed", request_payload)
         embedding = payload.get("embedding", [])
         return [float(item) for item in embedding]
 
@@ -291,19 +300,28 @@ class RedisBackedInbox(InMemoryInbox):
 class PostgresBackedEpisodicStore(EpisodicStore):
     """PostgreSQL write-through adapter for L2 episodic memory."""
 
-    def __init__(self, config: MemoryConfig, connection: Any) -> None:
+    def __init__(
+        self,
+        config: MemoryConfig,
+        connection: Any,
+        embedder: Optional[Embedder] = None,
+    ) -> None:
         """Initialize the PostgreSQL-backed L2 adapter.
 
         输入:
             config: 记忆系统配置。
             connection: psycopg 连接对象。
+            embedder: 可选统一向量函数。
         输出:
             None。
         示例:
             示例输入: PostgresBackedEpisodicStore(config, conn)
             示例输出: L2 写入会同步 upsert PostgreSQL。
         """
-        super().__init__(config)
+        if embedder is None:
+            super().__init__(config)
+        else:
+            super().__init__(config, embedder=embedder)
         self.connection = connection
 
     def promote(
@@ -444,19 +462,28 @@ class PostgresBackedEpisodicStore(EpisodicStore):
 class PostgresBackedSemanticStore(SemanticStore):
     """PostgreSQL write-through adapter for L3 semantic facts."""
 
-    def __init__(self, config: MemoryConfig, connection: Any) -> None:
+    def __init__(
+        self,
+        config: MemoryConfig,
+        connection: Any,
+        embedder: Optional[Embedder] = None,
+    ) -> None:
         """Initialize the PostgreSQL-backed L3 adapter.
 
         输入:
             config: 记忆系统配置。
             connection: psycopg 连接对象。
+            embedder: 可选统一向量函数。
         输出:
             None。
         示例:
             示例输入: PostgresBackedSemanticStore(config, conn)
             示例输出: L3 upsert 会同步 PostgreSQL。
         """
-        super().__init__(config)
+        if embedder is None:
+            super().__init__(config)
+        else:
+            super().__init__(config, embedder=embedder)
         self.connection = connection
 
     def upsert(
@@ -728,15 +755,29 @@ def build_production_backend(config: MemoryConfig) -> MemoryBackendBundle:
     postgres_l2 = _build_postgres_connection(config)
     postgres_l3 = _build_postgres_connection(config)
     neo4j_driver = _build_neo4j_driver(config)
+    if config.llm_gateway_url:
+        llm_gateway: LLMGatewayPort = HttpLLMGateway(config)
+    else:
+        llm_gateway = NoopLLMGateway(config)
+    embedding_runtime = EmbeddingRuntime(config, gateway=llm_gateway)
     return MemoryBackendBundle(
         l0=RedisBackedConversationBuffer(config, redis_client),
         l1=WorkingMemoryManager(config),
-        l2=PostgresBackedEpisodicStore(config, postgres_l2),
-        l3=PostgresBackedSemanticStore(config, postgres_l3),
+        l2=PostgresBackedEpisodicStore(
+            config,
+            postgres_l2,
+            embedder=embedding_runtime.embed,
+        ),
+        l3=PostgresBackedSemanticStore(
+            config,
+            postgres_l3,
+            embedder=embedding_runtime.embed,
+        ),
         l4=Neo4jBackedCognitiveGraph(config, neo4j_driver),
         inbox=RedisBackedInbox(config, redis_client),
         storage=MemoryFileStore(config.memory_dir),
-        llm_gateway=HttpLLMGateway(config),
+        llm_gateway=llm_gateway,
+        embedding_runtime=embedding_runtime,
         profile="production",
         external_services={
             "redis_url": _redact(config.redis_url),
@@ -764,8 +805,9 @@ def _require_production_config(config: MemoryConfig) -> None:
         "neo4j_uri": config.neo4j_uri,
         "neo4j_user": config.neo4j_user,
         "neo4j_password": config.neo4j_password,
-        "llm_gateway_url": config.llm_gateway_url,
     }
+    if config.embedding_backend != "local":
+        required["llm_gateway_url"] = config.llm_gateway_url
     missing = sorted(key for key, value in required.items() if not value)
     if missing:
         msg = "production backend requires: " + ", ".join(missing)

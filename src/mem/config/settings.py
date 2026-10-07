@@ -40,6 +40,18 @@ class MemoryConfig:
     # 生产 LLM Gateway 鉴权 token。
     llm_api_key: Optional[str] = None
 
+    # LLM Gateway 使用的结构化决策模型；为空时由 Gateway 决定默认模型。
+    llm_model: Optional[str] = None
+
+    # LLM Gateway 使用的向量模型；为空时由 Gateway 决定默认模型。
+    embedding_model: Optional[str] = None
+
+    # 向量后端：auto 按运行模式选择，local 使用内置实现，gateway 使用 HTTP Gateway。
+    embedding_backend: str = "auto"
+
+    # LLM Gateway 单次请求超时秒数，与其它生产依赖连接超时解耦。
+    llm_request_timeout_seconds: float = 10.0
+
     # 生产后端连接超时秒数。
     backend_connection_timeout_seconds: float = 3.0
 
@@ -172,6 +184,12 @@ class MemoryConfig:
         if self.backend_connection_timeout_seconds <= 0:
             msg = "backend_connection_timeout_seconds must be positive."
             raise ValueError(msg)
+        if self.llm_request_timeout_seconds <= 0:
+            msg = "llm_request_timeout_seconds must be positive."
+            raise ValueError(msg)
+        if self.embedding_backend not in {"auto", "local", "gateway"}:
+            msg = "embedding_backend must be 'auto', 'local', or 'gateway'."
+            raise ValueError(msg)
         if not 0 < self.theta_ctx_ratio <= 1:
             msg = "theta_ctx_ratio must be in (0, 1]."
             raise ValueError(msg)
@@ -281,6 +299,9 @@ class MemoryConfig:
             "neo4j_password": self.neo4j_password,
             "llm_gateway_url": self.llm_gateway_url,
             "llm_api_key": self.llm_api_key,
+            "llm_model": self.llm_model,
+            "embedding_model": self.embedding_model,
+            "embedding_backend": self.embedding_backend,
         }
 
     def dynamic_forget_threshold(self, occupancy: float) -> float:

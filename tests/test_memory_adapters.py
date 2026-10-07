@@ -12,6 +12,8 @@ import pytest
 from mem import AgentMemory, MemoryConfig, build_memory_backend
 from mem.adapters import NoopLLMGateway
 from mem.adapters import production as prod
+from mem.embedding.provider import EmbeddingRuntime
+from mem.exceptions import BackendDependencyError
 from mem.memory.models import EpisodicMemory, MemoryType, NodeType
 from mem.retrieval import candidate_limit_for
 from mem.retrieval.pipeline import _route_limit
@@ -86,6 +88,29 @@ def test_production_backend_requires_explicit_dependency_config() -> None:
     assert "llm_gateway_url" in message
 
 
+def test_production_local_embedding_does_not_require_llm_gateway(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify explicit local vectors can run without a model service."""
+    config = MemoryConfig(
+        backend_mode="production",
+        embedding_backend="local",
+        redis_url="redis://localhost:6379/0",
+        postgres_dsn="postgres://localhost/memx",
+        neo4j_uri="bolt://localhost:7687",
+        neo4j_user="neo4j",
+        neo4j_password="secret",
+    )
+    monkeypatch.setattr(prod, "_build_redis_client", MagicMock())
+    monkeypatch.setattr(prod, "_build_postgres_connection", MagicMock())
+    monkeypatch.setattr(prod, "_build_neo4j_driver", MagicMock())
+
+    bundle = prod.build_production_backend(config)
+
+    assert isinstance(bundle.llm_gateway, NoopLLMGateway)
+    assert bundle.embedding_runtime.provider == "local"
+
+
 def test_backend_config_boundaries_and_noop_gateway() -> None:
     """Verify new backend configuration boundaries and local gateway behavior.
 
@@ -112,6 +137,47 @@ def test_backend_config_boundaries_and_noop_gateway() -> None:
     assert gateway.decide_json("prompt", {"type": "object"})["op"] == "skip"
     assert len(gateway.embed("Agent memory")) == config.embedding_dimensions
     assert gateway.healthcheck()["status"] == "ok"
+
+
+def test_embedding_runtime_supports_local_fallback_and_validates_gateway() -> None:
+    """Verify OpenAI-independent local vectors and strict gateway dimensions."""
+
+    class Gateway:
+        def __init__(self, vector: list[float]) -> None:
+            self.vector = vector
+
+        def decide_json(self, prompt: str, schema: dict) -> dict:
+            return {"op": "skip"}
+
+        def embed(self, text: str) -> list[float]:
+            return self.vector
+
+        def healthcheck(self) -> dict:
+            return {"status": "ok", "mode": "test"}
+
+    local_config = MemoryConfig(
+        embedding_backend="local",
+        embedding_dimensions=4,
+    )
+    local_runtime = EmbeddingRuntime(local_config)
+
+    assert len(local_runtime.embed("no OpenAI required", 4)) == 4
+    assert local_runtime.diagnostics()["provider"] == "deterministic_local"
+
+    gateway_config = MemoryConfig(
+        backend_mode="production",
+        embedding_backend="gateway",
+        embedding_dimensions=3,
+        embedding_model=None,
+    )
+    gateway_runtime = EmbeddingRuntime(gateway_config, gateway=Gateway([0.1] * 3))
+
+    assert gateway_runtime.embed("remote", 3) == (0.1, 0.1, 0.1)
+    assert gateway_runtime.diagnostics()["model"] == "gateway_default"
+
+    invalid_runtime = EmbeddingRuntime(gateway_config, gateway=Gateway([0.1]))
+    with pytest.raises(BackendDependencyError, match="unexpected vector dimension"):
+        invalid_runtime.embed("remote", 3)
 
 
 def test_http_llm_gateway_posts_json_and_reports_health(
@@ -156,6 +222,32 @@ def test_http_llm_gateway_posts_json_and_reports_health(
     assert unavailable["status"] == "unavailable"
     assert unavailable["mode"] == "http"
     assert "gateway down" in unavailable["error"]
+
+
+def test_gateway_embedding_is_used_by_memory_mode_read_and_write_paths(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify remote vectors drive L2/L3 writes and their query embeddings."""
+    config = MemoryConfig(
+        embedding_backend="gateway",
+        embedding_dimensions=2,
+        llm_gateway_url="http://gateway.local",
+        persist_on_write=False,
+    )
+    response = MagicMock()
+    response.__enter__.return_value.read.return_value = b'{"embedding": [0.6, 0.8]}'
+    urlopen = MagicMock(return_value=response)
+    monkeypatch.setattr(prod.urllib.request, "urlopen", urlopen)
+    backend = build_memory_backend(config)
+
+    episode = backend.l2.promote("remember gateway", "scope", 8)
+    backend.l2.retrieve("gateway", "scope", 1)
+    backend.l3.upsert("provider", "scope", "gateway", 0.9)
+    backend.l3.semantic_search("gateway", "scope", 1)
+
+    assert episode.embedding == (0.6, 0.8)
+    assert backend.l3.query("provider", "scope").embedding == (0.6, 0.8)
+    assert urlopen.call_count == 4
 
 
 def test_production_write_through_adapters_delegate_to_clients() -> None:
@@ -399,6 +491,9 @@ def test_build_production_backend_assembles_redacted_bundle(
         assert isinstance(bundle.l3, prod.PostgresBackedSemanticStore)
         assert isinstance(bundle.l4, prod.Neo4jBackedCognitiveGraph)
         assert isinstance(bundle.inbox, prod.RedisBackedInbox)
+        assert bundle.embedding_runtime.provider == "gateway"
+        assert bundle.l2.embedder == bundle.embedding_runtime.embed
+        assert bundle.l3.embedder == bundle.embedding_runtime.embed
         assert bundle.external_services["redis_url"] == "redis://***@localhost:6379/0"
         assert bundle.external_services["postgres_dsn"] == (
             "postgres://***@localhost/db"

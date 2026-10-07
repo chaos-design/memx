@@ -1,6 +1,8 @@
 # 存储与 Schema
 
 本文档说明 `memx` 的数据分层、参考 Schema、索引设计和生命周期。当前项目通过 `src/mem/schemas/ddl.py` 提供参考 DDL；生产部署可以按实际数据库规范等价实现。
+对应的 Python dataclass、运行时索引和目标扩展字段见
+[数据结构与存储模型](architecture/data-models.md)。
 
 ## 数据分层
 

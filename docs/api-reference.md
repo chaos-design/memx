@@ -75,8 +75,9 @@ result = memory.recall("session-2", "用户偏好的回复语言", k=3)
 result = memory.search("session-2", "dark mode", k=5)
 ```
 
-
+### `get_context(session_id, query=None)`
 拼装可放入 Agent prompt 的上下文字符串。传入 `query` 时，会附加召回到的 Facts 和 Episodes。
+
 
 ```python
 context = memory.get_context(
@@ -84,6 +85,32 @@ context = memory.get_context(
     query="语言偏好",
 )
 ```
+
+### `assemble_prompt(session_id, user_input, system_prompt, query=None)`
+
+召回记忆并组装成 OpenAI 兼容 Chat API 的 `messages`。`query=None` 时使用
+`user_input` 召回；传入空字符串可只使用当前 L1 工作记忆。
+
+```python
+messages = memory.assemble_prompt(
+    session_id="session-2",
+    user_input="我的回复语言是什么？",
+    system_prompt="Answer accurately and concisely.",
+    query="user.lang_pref",
+)
+```
+
+| 输入 | 行为 |
+| --- | --- |
+| 新 session、无记忆 | 输出 system + user 两条消息 |
+| L1 有工作记忆 | 在 system 与 user 之间插入 L1 context |
+| query 命中 L2/L3 | memory message 包含 `Verified Facts` / `Relevant Episodes` |
+| `query=None` | 使用当前 `user_input` 作为召回 query |
+| `query=""` | 不执行长期记忆召回 |
+| system prompt 或 user input 为空 | 抛出 `ValidationError` |
+
+输出角色顺序固定为 `system -> memory system（可选）-> user`。memory message 使用
+`<memory_context>` 边界，并声明召回内容是不可信参考数据，不能覆盖基础系统指令。
 
 ## 固化、遗忘与调度
 

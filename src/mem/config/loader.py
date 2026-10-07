@@ -10,6 +10,7 @@ from ..constants import HMS_CONFIG_FILENAME
 from ..exceptions import ConfigurationError
 from ..utils.json import merge_json_objects, read_json_object, write_json_object
 from ..utils.validation import narrow_config_values, validate_config_updates
+from .environment import LLM_CONFIG_FIELDS, EnvPath, load_llm_environment
 from .settings import MemoryConfig
 
 ConfigPath = Union[str, Path]
@@ -54,18 +55,28 @@ def read_hms_config(path: Optional[ConfigPath] = None) -> Dict[str, Any]:
         msg = f"unreadable hms config file: {config_path}: {exc}"
         raise ConfigurationError(msg) from exc
     validate_config_updates(config, MemoryConfig)
-    return config
+    # 模型字段统一由 .env/进程环境供给；hms.json 中的历史残留字段静默忽略，
+    # 保证旧配置文件可迁移而非直接报错。
+    return {
+        key: value for key, value in config.items() if key not in LLM_CONFIG_FIELDS
+    }
 
 
 def load_memory_config(
     path: Optional[ConfigPath] = None,
     overrides: Optional[Mapping[str, Any]] = None,
+    env_path: Optional[EnvPath] = None,
+    environ: Optional[Mapping[str, str]] = None,
 ) -> MemoryConfig:
-    """Load MemoryConfig from defaults, hms.json, and explicit overrides.
+    """Load MemoryConfig from hms.json, model environment, and overrides.
+
+    配置优先级：hms.json < .env/进程环境（仅模型字段）< 显式 overrides。
 
     输入:
         path: 可选 hms.json 路径。
         overrides: 显式覆盖配置。
+        env_path: 可选 dotenv 路径；None 使用项目根目录 .env。
+        environ: 可选进程环境映射，主要用于测试与嵌入式调用。
     输出:
         MemoryConfig: 已校验的配置对象。
     示例:
@@ -73,9 +84,11 @@ def load_memory_config(
         示例输出: MemoryConfig(max_recall_k=10, ...)
     """
     file_config = read_hms_config(path)
+    env_config = load_llm_environment(path=env_path, environ=environ)
     override_config = dict(overrides or {})
     validate_config_updates(override_config, MemoryConfig)
-    merged = merge_json_objects(file_config, override_config)
+    merged = merge_json_objects(file_config, env_config)
+    merged = merge_json_objects(merged, override_config)
     coerced = _coerce_config_values(merged)
     try:
         return MemoryConfig(**coerced)
@@ -105,6 +118,10 @@ def write_hms_config(
     config_path = Path(path) if path is not None else default_config_path()
     update_dict = dict(updates)
     validate_config_updates(update_dict, MemoryConfig)
+    env_only = sorted(set(update_dict) & LLM_CONFIG_FIELDS)
+    if env_only:
+        msg = "model settings must be configured through .env: " + ", ".join(env_only)
+        raise ConfigurationError(msg)
     current = read_hms_config(config_path)
     merged = merge_json_objects(current, update_dict)
     validated = load_memory_config(config_path, update_dict)

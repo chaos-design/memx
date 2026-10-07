@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from ..config.settings import MemoryConfig
+from ..embedding.provider import EmbeddingRuntime
 from ..embedding.vector import embed_text
 from ..graph.cognitive import CognitiveGraph
 from ..ingest.buffer import ConversationBuffer
@@ -104,30 +105,39 @@ class MemoryBackendBundle:
     inbox: InboxPort
     storage: SnapshotStorePort
     llm_gateway: LLMGatewayPort
+    embedding_runtime: EmbeddingRuntime
     profile: str = "memory"
     external_services: Dict[str, Any] = field(default_factory=dict)
 
     @classmethod
-    def in_memory(cls, config: MemoryConfig) -> "MemoryBackendBundle":
+    def in_memory(
+        cls,
+        config: MemoryConfig,
+        llm_gateway: Optional[LLMGatewayPort] = None,
+    ) -> "MemoryBackendBundle":
         """Build the default in-memory backend bundle.
 
         输入:
             config: 记忆系统配置。
+            llm_gateway: 可选 HTTP Gateway，用于本地存储配合远程 embedding。
         输出:
             MemoryBackendBundle: 内存 Adapter 组合。
         示例:
             示例输入: MemoryBackendBundle.in_memory(MemoryConfig())
             示例输出: profile="memory" 的后端组合。
         """
+        gateway = llm_gateway or NoopLLMGateway(config)
+        embedding_runtime = EmbeddingRuntime(config, gateway=gateway)
         return cls(
             l0=ConversationBuffer(config),
             l1=WorkingMemoryManager(config),
-            l2=EpisodicStore(config),
-            l3=SemanticStore(config),
+            l2=EpisodicStore(config, embedder=embedding_runtime.embed),
+            l3=SemanticStore(config, embedder=embedding_runtime.embed),
             l4=CognitiveGraph(config),
             inbox=InMemoryInbox(max_retries=config.inbox_max_retries),
             storage=MemoryFileStore(config.memory_dir),
-            llm_gateway=NoopLLMGateway(config),
+            llm_gateway=gateway,
+            embedding_runtime=embedding_runtime,
             profile="memory",
             external_services={"local_snapshot": config.memory_dir},
         )
@@ -143,6 +153,7 @@ class MemoryBackendBundle:
             示例输入: bundle.diagnostics()
             示例输出: {"profile": "memory", "adapters": {...}}
         """
+        gateway_status = self.llm_gateway.healthcheck()
         return {
             "profile": self.profile,
             "adapters": {
@@ -156,7 +167,8 @@ class MemoryBackendBundle:
                 "llm_gateway": type(self.llm_gateway).__name__,
             },
             "external_services": dict(self.external_services),
-            "llm_gateway": self.llm_gateway.healthcheck(),
+            "llm_gateway": gateway_status,
+            "embedding": self.embedding_runtime.diagnostics(gateway_status),
         }
 
 
@@ -172,7 +184,12 @@ def build_memory_backend(config: MemoryConfig) -> MemoryBackendBundle:
         示例输出: MemoryBackendBundle(profile="memory", ...)
     """
     if config.backend_mode == "memory":
-        return MemoryBackendBundle.in_memory(config)
+        gateway = None
+        if config.embedding_backend == "gateway":
+            from .production import HttpLLMGateway
+
+            gateway = HttpLLMGateway(config)
+        return MemoryBackendBundle.in_memory(config, llm_gateway=gateway)
     from .production import build_production_backend
 
     return build_production_backend(config)
