@@ -23,11 +23,14 @@ htmlcov/
 # Runtime state
 .memories/
 
-# Node / VitePress docs site
+# Local workspace / agent data
+.workbuddy/
+
+# Node site (Vite + React)
 node_modules/
 
-# VitePress build output (docs/.vitepress/dist)
-docs/.vitepress/dist/
+# site build output
+site/dist/
 
 # Local editor and OS files
 .DS_Store

@@ -35,15 +35,16 @@ jobs:
           cache: npm
 
       - name: Install dependencies
-        run: npm install
+        run: cd site && npm install --no-audit --no-fund
 
       - name: Build site
-        run: npm run build
+        run: cd site && npm run build
 
       - name: Verify build output
         run: |
-          test -f docs/.vitepress/dist/index.html || { echo "✗ missing index.html in output dir"; exit 1; }
-          echo "✓ build OK: $(find docs/.vitepress/dist -name '*.html' | wc -l) html pages in docs/.vitepress/dist"
+          test -f site/dist/index.html || { echo "✗ missing index.html in output dir"; exit 1; }
+          test -f site/dist/artifacts/interview-question-bank.html || { echo "✗ missing artifact"; exit 1; }
+          echo "✓ build OK: $(find site/dist -name '*.html' | wc -l) html pages in site/dist"
 
   # 2) 部署到 Vercel：PR → preview 部署；push main/master → production 部署
   deploy:
