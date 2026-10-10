@@ -1,4 +1,10 @@
-name: Docs → Vercel 部署
+name: Docs 站点构建校验
+
+# 本工作流仅作为「构建门禁」：在 PR 与 push 时安装依赖、构建静态站点并校验产物。
+# 不依赖任何 Secret，也不使用 GitHub Pages。
+# 实际部署由 Vercel 自身的 Git 集成完成 —— Vercel 连接本仓库后会读取仓库根的
+# vercel.json（buildCommand / outputDirectory）在云端自动构建并部署，无需在
+# GitHub 侧配置 Vercel Token。
 
 on:
   push:
@@ -8,7 +14,6 @@ on:
 
 permissions:
   contents: read
-  pull-requests: write
 
 # 同一 ref 重复触发时取消在跑的旧任务，节省 runner
 concurrency:
@@ -19,7 +24,7 @@ env:
   NODE_VERSION: '22'
 
 jobs:
-  # 1) 安装依赖 → 构建 → 校验产物目录，作为部署前的门禁
+  # 安装依赖 → 构建 → 校验产物目录，作为部署前的门禁
   build:
     name: 安装依赖 & 构建
     runs-on: ubuntu-latest
@@ -47,50 +52,3 @@ jobs:
           test -f site/dist/index.html || { echo "✗ missing index.html in output dir"; exit 1; }
           test -f site/dist/artifacts/interview-question-bank.html || { echo "✗ missing artifact"; exit 1; }
           echo "✓ build OK: $(find site/dist -name '*.html' | wc -l) html pages in site/dist"
-
-  # 2) 探测 Vercel Secrets 是否已配置，输出布尔供 deploy job 门控
-  #    注意：job/step 的 if 不能直接引用 secrets 上下文（会导致派发失败），
-  #    因此先把 secret 读入环境变量，再输出 has-token 供下游 if 判断。
-  check-secrets:
-    name: 检查 Vercel Secrets
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    outputs:
-      has-token: ${{ steps.check.outputs.has-token }}
-    steps:
-      - id: check
-        env:
-          TOKEN: ${{ secrets.VERCEL_TOKEN }}
-        run: |
-          if [ -n "$TOKEN" ]; then
-            echo "has-token=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "has-token=false" >> "$GITHUB_OUTPUT"
-          fi
-
-  # 3) 部署到 Vercel：PR → preview 部署；push main/master → production 部署
-  #    仅当 check-secrets 探测到 VERCEL_TOKEN 已配置才执行，否则自动跳过（不报红）。
-  deploy:
-    name: 部署到 Vercel
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    needs: [build, check-secrets]
-    if: needs.check-secrets.outputs.has-token == 'true'
-    permissions:
-      contents: read
-      deployments: write
-      pull-requests: write
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Deploy to Vercel
-        # 安装依赖与构建在 Vercel 云端执行（读取 vercel.json 的 buildCommand/outputDirectory）
-        uses: vercel/vercel-action@v3
-        with:
-          vercel-token: ${{ secrets.VERCEL_TOKEN }}
-          vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}
-          vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          # 主干 push 走生产部署；PR 走预览部署
-          vercel-args: ${{ github.event_name == 'push' && '--prod' || '' }}
