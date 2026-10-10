@@ -23,6 +23,12 @@ htmlcov/
 # Runtime state
 .memories/
 
+# Node / VitePress docs site
+node_modules/
+
+# VitePress build output (docs/.vitepress/dist)
+docs/.vitepress/dist/
+
 # Local editor and OS files
 .DS_Store
 .idea/

@@ -1,0 +1,67 @@
+name: Docs → Vercel 部署
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+# 同一 ref 重复触发时取消在跑的旧任务，节省 runner
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: '22'
+
+jobs:
+  # 1) 安装依赖 → 构建 → 校验产物目录，作为部署前的门禁
+  build:
+    name: 安装依赖 & 构建
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build site
+        run: npm run build
+
+      - name: Verify build output
+        run: |
+          test -f docs/.vitepress/dist/index.html || { echo "✗ missing index.html in output dir"; exit 1; }
+          echo "✓ build OK: $(find docs/.vitepress/dist -name '*.html' | wc -l) html pages in docs/.vitepress/dist"
+
+  # 2) 部署到 Vercel：PR → preview 部署；push main/master → production 部署
+  deploy:
+    name: 部署到 Vercel
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: build
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Deploy to Vercel
+        # 安装依赖与构建在 Vercel 云端执行（读取 vercel.json 的 buildCommand/outputDirectory）
+        uses: vercel/vercel-action@v3
+        with:
+          vercel-token: ${{ secrets.VERCEL_TOKEN }}
+          vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}
+          vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          # 主干 push 走生产部署；PR 走预览部署
+          vercel-args: ${{ github.event_name == 'push' && '--prod' || '' }}

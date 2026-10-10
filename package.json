@@ -1,0 +1,15 @@
+{
+  "name": "memx-docs",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Static docs site for memx (Agent long-term memory) built with VitePress",
+  "scripts": {
+    "dev": "vitepress dev docs",
+    "build": "vitepress build docs",
+    "preview": "vitepress preview docs"
+  },
+  "devDependencies": {
+    "vitepress": "^1.5.0"
+  }
+}
