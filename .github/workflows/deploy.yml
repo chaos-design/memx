@@ -49,11 +49,17 @@ jobs:
           echo "✓ build OK: $(find site/dist -name '*.html' | wc -l) html pages in site/dist"
 
   # 2) 部署到 Vercel：PR → preview 部署；push main/master → production 部署
+  #    仅当仓库已配置 VERCEL_TOKEN 等 Secrets 才执行；未配置时自动跳过（不报红）。
   deploy:
     name: 部署到 Vercel
     runs-on: ubuntu-latest
     timeout-minutes: 20
     needs: build
+    if: ${{ secrets.VERCEL_TOKEN != '' }}
+    permissions:
+      contents: read
+      deployments: write
+      pull-requests: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
