@@ -33,6 +33,8 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
+          # 依赖与锁文件都在 site/ 子目录（npm 独立包），指定 lock 文件路径供缓存
+          cache-dependency-path: site/package-lock.json
 
       - name: Install dependencies
         run: cd site && npm install --no-audit --no-fund
