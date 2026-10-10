@@ -1,0 +1,54 @@
+name: Docs 站点构建校验
+
+# 本工作流仅作为「构建门禁」：在 PR 与 push 时安装依赖、构建静态站点并校验产物。
+# 不依赖任何 Secret，也不使用 GitHub Pages。
+# 实际部署由 Vercel 自身的 Git 集成完成 —— Vercel 连接本仓库后会读取仓库根的
+# vercel.json（buildCommand / outputDirectory）在云端自动构建并部署，无需在
+# GitHub 侧配置 Vercel Token。
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+permissions:
+  contents: read
+
+# 同一 ref 重复触发时取消在跑的旧任务，节省 runner
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: '22'
+
+jobs:
+  # 安装依赖 → 构建 → 校验产物目录，作为部署前的门禁
+  build:
+    name: 安装依赖 & 构建
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          # 依赖与锁文件都在 site/ 子目录（npm 独立包），指定 lock 文件路径供缓存
+          cache-dependency-path: site/package-lock.json
+
+      - name: Install dependencies
+        run: cd site && npm install --no-audit --no-fund
+
+      - name: Build site
+        run: cd site && npm run build
+
+      - name: Verify build output
+        run: |
+          test -f site/dist/index.html || { echo "✗ missing index.html in output dir"; exit 1; }
+          test -f site/dist/artifacts/interview-question-bank.html || { echo "✗ missing artifact"; exit 1; }
+          echo "✓ build OK: $(find site/dist -name '*.html' | wc -l) html pages in site/dist"

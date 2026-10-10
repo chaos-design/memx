@@ -25,6 +25,15 @@ htmlcov/
 # Runtime state
 .memories/
 
+# Local workspace / agent data
+.workbuddy/
+
+# Node site (Vite + React)
+node_modules/
+
+# site build output
+site/dist/
+
 # Local editor and OS files
 .DS_Store
 .idea/
