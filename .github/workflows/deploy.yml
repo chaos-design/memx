@@ -48,14 +48,34 @@ jobs:
           test -f site/dist/artifacts/interview-question-bank.html || { echo "✗ missing artifact"; exit 1; }
           echo "✓ build OK: $(find site/dist -name '*.html' | wc -l) html pages in site/dist"
 
-  # 2) 部署到 Vercel：PR → preview 部署；push main/master → production 部署
-  #    仅当仓库已配置 VERCEL_TOKEN 等 Secrets 才执行；未配置时自动跳过（不报红）。
+  # 2) 探测 Vercel Secrets 是否已配置，输出布尔供 deploy job 门控
+  #    注意：job/step 的 if 不能直接引用 secrets 上下文（会导致派发失败），
+  #    因此先把 secret 读入环境变量，再输出 has-token 供下游 if 判断。
+  check-secrets:
+    name: 检查 Vercel Secrets
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      has-token: ${{ steps.check.outputs.has-token }}
+    steps:
+      - id: check
+        env:
+          TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          if [ -n "$TOKEN" ]; then
+            echo "has-token=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has-token=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  # 3) 部署到 Vercel：PR → preview 部署；push main/master → production 部署
+  #    仅当 check-secrets 探测到 VERCEL_TOKEN 已配置才执行，否则自动跳过（不报红）。
   deploy:
     name: 部署到 Vercel
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    needs: build
-    if: ${{ secrets.VERCEL_TOKEN != '' }}
+    needs: [build, check-secrets]
+    if: needs.check-secrets.outputs.has-token == 'true'
     permissions:
       contents: read
       deployments: write
