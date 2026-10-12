@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { catalogFor, getDoc, orderedDocSlugs } from "./docs";
 import { useLang } from "./i18n";
 import { Lightbox } from "./Lightbox";
+import { DocSkeleton } from "./Loading";
 import { type RenderedDoc, renderMarkdown } from "./markdown";
 import { ROUTES } from "./routes";
 
@@ -103,18 +104,17 @@ export function DocView({ slug }: { slug: string }) {
 
       <div className="doc-layout">
         <div>
-          <div
-            ref={bodyRef}
-            className="doc-body"
-            // Content is generated only by our own marked + hljs + mermaid pipeline
-            // over repository-provided docs; no external input can reach this value.
-            dangerouslySetInnerHTML={doc ? { __html: doc.html } : undefined}
-          />
-          {!doc ? (
-            <p className="doc-loading" style={{ color: "var(--faint)" }}>
-              {t.rendering}
-            </p>
-          ) : null}
+          {doc ? (
+            <div
+              ref={bodyRef}
+              className="doc-body"
+              // Content is generated only by our own marked + hljs + mermaid pipeline
+              // over repository-provided docs; no external input can reach this value.
+              dangerouslySetInnerHTML={{ __html: doc.html }}
+            />
+          ) : (
+            <DocSkeleton label={t.rendering} />
+          )}
 
           <div className="pager">
             {prev ? (

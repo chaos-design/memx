@@ -65,17 +65,25 @@ a:hover {
 }
 
 /* ===== Shell ===== */
+/* Locked to exactly one viewport: the sidebar keeps a stable 100vh box and
+   only the content column scrolls, so a long document (or an empty one) can
+   never stretch or collapse the menu. */
 .shell {
   display: grid;
   grid-template-columns: var(--sidebar-w) minmax(0, 1fr);
-  min-height: 100vh;
+  grid-template-rows: minmax(0, 1fr);
+  height: 100vh;
+  min-height: 0;
+  overflow: hidden;
 }
 
 /* ===== Sidebar ===== */
 .sidebar {
-  position: sticky;
-  top: 0;
-  height: 100vh;
+  position: relative;
+  height: 100%;
+  /* Grid items stretch to the row; cap the height so content can't push it. */
+  max-height: 100vh;
+  min-height: 0;
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -238,8 +246,12 @@ a:hover {
 }
 
 /* ===== Content ===== */
+/* Owns its own scrollbar inside the fixed-height shell. */
 .content {
-  min-height: 100vh;
+  height: 100%;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 0 0 80px;
 }
 .content-inner {
@@ -606,6 +618,96 @@ a:hover {
   padding-bottom: 48px;
 }
 
+/* ===== Loading ===== */
+.loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 13px;
+}
+.spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--line);
+  border-top-color: var(--blue);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  flex: 0 0 auto;
+}
+.spinner.lg {
+  width: 26px;
+  height: 26px;
+  border-width: 3px;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Placeholder shown while a document is parsed / mermaid diagrams render. */
+.doc-skeleton {
+  padding: 6px 0 4px;
+}
+.doc-skeleton .sk-line {
+  height: 12px;
+  border-radius: 6px;
+  margin-bottom: 12px;
+  background: linear-gradient(
+    90deg,
+    var(--surface-3) 25%,
+    var(--surface-2) 37%,
+    var(--surface-3) 63%
+  );
+  background-size: 400% 100%;
+  animation: shimmer 1.3s ease-in-out infinite;
+}
+.doc-skeleton .sk-title {
+  height: 24px;
+  width: 46%;
+  margin-bottom: 20px;
+}
+.doc-skeleton .sk-block {
+  height: 148px;
+  margin-bottom: 18px;
+}
+@keyframes shimmer {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: 0 0;
+  }
+}
+
+/* Wrapper for embedded artifacts: an overlay spinner until the iframe fires
+   load, so switching artifacts no longer shows a blank frame. */
+.frame-wrap {
+  position: relative;
+  min-height: 120px;
+}
+.frame-loading {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  z-index: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spinner {
+    animation-duration: 2.4s;
+  }
+  .doc-skeleton .sk-line {
+    animation: none;
+  }
+}
+
 /* ===== Artifact (iframe) ===== */
 .artifact-frame {
   width: 100%;
@@ -652,12 +754,22 @@ a:hover {
   letter-spacing: 0.3px;
   flex: 1;
 }
+/* Wrapper keeps the iframe's flex sizing intact while hosting the spinner. */
+.immersive-frame-wrap {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+}
 .immersive-frame {
   flex: 1;
   width: 100%;
   min-height: 0;
   border: none;
   background: var(--surface);
+}
+.immersive-frame-wrap .frame-loading {
+  border: none;
+  border-radius: 0;
 }
 
 /* ===== Badges / pills ===== */
@@ -908,10 +1020,22 @@ a:hover {
 @media (max-width: 860px) {
   .shell {
     grid-template-columns: 1fr;
+    /* Mobile falls back to normal document flow: the page scrolls as a whole
+       and the sidebar is a stacked block above the content. */
+    grid-template-rows: auto;
+    height: auto;
+    min-height: 100vh;
+    overflow: visible;
+  }
+  .content {
+    height: auto;
+    min-height: 0;
+    overflow: visible;
   }
   .sidebar {
     position: static;
     height: auto;
+    max-height: none;
     overflow: visible;
     display: block;
     border-right: none;

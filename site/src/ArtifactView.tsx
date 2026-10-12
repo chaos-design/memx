@@ -1,12 +1,20 @@
 import { useEffect, useState } from "react";
 import { artifactPages, getArtifact } from "./artifacts";
 import { useLang } from "./i18n";
+import { FrameLoading } from "./Loading";
 import { ROUTES } from "./routes";
 
 export function ArtifactView({ slug }: { slug: string }) {
   const { t } = useLang();
   const artifact = getArtifact(slug);
   const [immersive, setImmersive] = useState(false);
+  // The embedded page is heavier than the shell; show an overlay until its
+  // load event fires, and reset whenever the target changes.
+  const [frameLoading, setFrameLoading] = useState(true);
+
+  useEffect(() => {
+    setFrameLoading(true);
+  }, [slug, immersive]);
 
   // Esc exits immersive mode.
   useEffect(() => {
@@ -55,12 +63,16 @@ export function ArtifactView({ slug }: { slug: string }) {
       </div>
 
       {!immersive ? (
-        <iframe
-          key={artifact.slug}
-          className="artifact-frame"
-          src={artifact.file}
-          title={artifact.title}
-        />
+        <div className="frame-wrap">
+          <iframe
+            key={artifact.slug}
+            className="artifact-frame"
+            src={artifact.file}
+            title={artifact.title}
+            onLoad={() => setFrameLoading(false)}
+          />
+          {frameLoading ? <FrameLoading label={t.loadingFrame} /> : null}
+        </div>
       ) : null}
 
       {immersive ? (
@@ -72,11 +84,15 @@ export function ArtifactView({ slug }: { slug: string }) {
               {t.exitImmersive}
             </button>
           </div>
-          <iframe
-            className="immersive-frame"
-            src={artifact.file}
-            title={`${artifact.title}${t.immersiveSuffix}`}
-          />
+          <div className="frame-wrap immersive-frame-wrap">
+            <iframe
+              className="immersive-frame"
+              src={artifact.file}
+              title={`${artifact.title}${t.immersiveSuffix}`}
+              onLoad={() => setFrameLoading(false)}
+            />
+            {frameLoading ? <FrameLoading label={t.loadingFrame} /> : null}
+          </div>
         </div>
       ) : null}
 
