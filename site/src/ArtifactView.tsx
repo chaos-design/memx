@@ -71,7 +71,7 @@ export function ArtifactView({ slug }: { slug: string }) {
             title={artifact.title}
             onLoad={() => setFrameLoading(false)}
           />
-          {frameLoading ? <FrameLoading label={t.loadingFrame} /> : null}
+          {frameLoading ? <FrameLoading /> : null}
         </div>
       ) : null}
 
@@ -91,7 +91,7 @@ export function ArtifactView({ slug }: { slug: string }) {
               title={`${artifact.title}${t.immersiveSuffix}`}
               onLoad={() => setFrameLoading(false)}
             />
-            {frameLoading ? <FrameLoading label={t.loadingFrame} /> : null}
+            {frameLoading ? <FrameLoading /> : null}
           </div>
         </div>
       ) : null}

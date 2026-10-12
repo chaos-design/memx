@@ -113,7 +113,7 @@ export function DocView({ slug }: { slug: string }) {
               dangerouslySetInnerHTML={{ __html: doc.html }}
             />
           ) : (
-            <DocSkeleton label={t.rendering} />
+            <DocSkeleton />
           )}
 
           <div className="pager">
