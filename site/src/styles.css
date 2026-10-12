@@ -82,20 +82,31 @@ a:hover {
   border-right: 1px solid var(--line);
   background: var(--surface);
 }
+/* Pinned header: the brand stays fixed while the nav scrolls under it. */
+.sidebar-head {
+  flex: 0 0 auto;
+  padding: 20px 16px 14px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+}
 .sidebar-scroll {
   flex: 1 1 auto;
   overflow-y: auto;
   min-height: 0;
-  padding: 20px 16px 16px;
+  padding: 16px 16px 16px;
 }
 /* Pinned at the bottom of the sidebar; does not scroll with the menu. */
 .sidebar-github {
   flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
   padding: 12px 16px;
   border-top: 1px solid var(--line);
   background: var(--surface-2);
 }
 .sidebar-github a {
+  flex: 1 1 auto;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -121,12 +132,21 @@ a:hover {
   margin-left: auto;
   color: var(--faint);
 }
+/* The language pill shares the pinned footer row with the GitHub link: drop
+   the auto margin it carries inside .brand, and match the link's height. */
+.sidebar-github .lang-toggle {
+  margin-left: 0;
+  padding: 8px 12px;
+  font-size: 12.5px;
+  border-radius: 8px;
+  background: var(--surface-3);
+}
 
 .brand {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 4px 8px 16px;
+  padding: 0;
 }
 .brand-mark {
   width: 30px;
@@ -142,7 +162,6 @@ a:hover {
   flex: 0 0 auto;
 }
 .lang-toggle {
-  margin-left: auto;
   border: 1px solid var(--line);
   background: var(--surface-2);
   color: var(--muted);
@@ -895,10 +914,14 @@ a:hover {
   }
   .sidebar-scroll {
     overflow: visible;
-    padding: 20px 16px 12px;
+    padding: 16px 16px 12px;
   }
-  /* GitHub is reachable from the mobile 吸底 bar instead, so drop the footer. */
+  /* GitHub is reachable from the mobile 吸底 bar instead; keep the footer
+     row only for the language toggle. */
   .sidebar-github {
+    justify-content: flex-end;
+  }
+  .sidebar-github a {
     display: none;
   }
   /* Full-width 吸底 content-switching bar (图1). */
