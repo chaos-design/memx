@@ -42,7 +42,8 @@ jobs:
           cache-dependency-path: site/package-lock.json
 
       - name: Install dependencies
-        run: cd site && npm install --no-audit --no-fund
+        # 锁文件已提交到 site/package-lock.json，用 npm ci 保证可复现安装
+        run: cd site && npm ci --no-audit --no-fund
 
       - name: Build site
         run: cd site && npm run build
@@ -52,3 +53,11 @@ jobs:
           test -f site/dist/index.html || { echo "✗ missing index.html in output dir"; exit 1; }
           test -f site/dist/artifacts/interview-question-bank.html || { echo "✗ missing artifact"; exit 1; }
           echo "✓ build OK: $(find site/dist -name '*.html' | wc -l) html pages in site/dist"
+
+      # 上传构建产物，便于在 PR 中预览 / 检查 site/dist
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: site-dist
+          path: site/dist
+          if-no-files-found: error
