@@ -105,20 +105,34 @@ a:hover {
   border-top: 1px solid var(--line);
   background: var(--surface-2);
 }
-.sidebar-github a {
-  flex: 1 1 auto;
+/* The pinned footer row splits its width evenly between the GitHub link and
+   the language pill, and both carry identical box metrics so they read as a
+   matched pair of buttons. */
+.sidebar-github a,
+.sidebar-github .lang-toggle {
+  flex: 1 1 0;
+  min-width: 0;
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 8px;
-  padding: 8px 12px;
+  height: 36px;
+  padding: 0 12px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--surface-3);
   color: var(--ink);
+  font-family: inherit;
   font-size: 13px;
+  font-weight: 500;
+  line-height: 1;
   text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease;
 }
-.sidebar-github a:hover {
+.sidebar-github a:hover,
+.sidebar-github .lang-toggle:hover {
   border-color: var(--blue);
   color: var(--ink);
   text-decoration: none;
@@ -129,17 +143,8 @@ a:hover {
   flex: 0 0 auto;
 }
 .sidebar-github .ext-arrow {
-  margin-left: auto;
-  color: var(--faint);
-}
-/* The language pill shares the pinned footer row with the GitHub link: drop
-   the auto margin it carries inside .brand, and match the link's height. */
-.sidebar-github .lang-toggle {
   margin-left: 0;
-  padding: 8px 12px;
-  font-size: 12.5px;
-  border-radius: 8px;
-  background: var(--surface-3);
+  color: var(--faint);
 }
 
 .brand {
@@ -923,6 +928,11 @@ a:hover {
   }
   .sidebar-github a {
     display: none;
+  }
+  /* GitHub is not rendered here; the lone language pill stays compact and
+     right-aligned instead of stretching across the row. */
+  .sidebar-github .lang-toggle {
+    flex: 0 0 auto;
   }
   /* Full-width 吸底 content-switching bar (图1). */
   .bottombar {
