@@ -7,16 +7,19 @@ import type { Plugin } from "vite";
 import { defineConfig } from "vite";
 
 // site/ 与 docs/、artifacts/ 同处仓库根目录下，向上取一层即可定位源目录
+const siteDir = fileURLToPath(new URL(".", import.meta.url));
 const repoRoot = fileURLToPath(new URL("..", import.meta.url));
 const docsDir = path.join(repoRoot, "docs");
 const artifactsDir = path.join(repoRoot, "artifacts");
 
 // Expose every docs/**/*.md file as Record<key, rawMarkdown> through a virtual
 // module, so the site renders the documentation at build time and stays fully
-// self-contained (no runtime fetch of the repo).
+// self-contained (no runtime fetch of the repo). Chinese docs live in docs/,
+// English translations in docs/en/ under the same relative keys.
 function docsModule(): Plugin {
   const virtualId = "virtual:memx-docs";
   const resolvedId = `\0${virtualId}`;
+  const enDir = path.join(docsDir, "en");
 
   function collectMarkdown(dir: string, prefix: string, out: Map<string, string>) {
     let entries: Dirent[];
@@ -28,6 +31,7 @@ function docsModule(): Plugin {
     for (const entry of entries) {
       const full = path.join(dir, entry.name);
       if (entry.isDirectory()) {
+        if (full === enDir) continue; // English docs are collected separately.
         collectMarkdown(full, `${prefix}${entry.name}/`, out);
       } else if (entry.isFile() && entry.name.endsWith(".md")) {
         const key = `${prefix}${entry.name}`.replace(/\.md$/, "");
@@ -45,11 +49,16 @@ function docsModule(): Plugin {
     },
     load(id) {
       if (id !== resolvedId) return null;
-      const docs = new Map<string, string>();
-      collectMarkdown(docsDir, "", docs);
-      const obj: Record<string, string> = {};
-      for (const [k, v] of docs) obj[k] = v;
-      return `export const docs = ${JSON.stringify(obj)};`;
+      const zh = new Map<string, string>();
+      collectMarkdown(docsDir, "", zh);
+      const en = new Map<string, string>();
+      collectMarkdown(enDir, "", en);
+      const toObj = (m: Map<string, string>) => {
+        const obj: Record<string, string> = {};
+        for (const [k, v] of m) obj[k] = v;
+        return obj;
+      };
+      return `export const docsByLang = ${JSON.stringify({ zh: toObj(zh), en: toObj(en) })};`;
     },
   };
 }
@@ -101,6 +110,8 @@ function copyArtifacts(): Plugin {
 }
 
 export default defineConfig({
+  // The Vite root is the site/ directory itself (index.html, src/ live here).
+  root: siteDir,
   // Relative base so the built site works from a repo root (Vercel), a
   // GitHub Pages subpath (/memx/), or a nested directory without a server
   // rewrite.

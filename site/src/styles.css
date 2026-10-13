@@ -15,6 +15,7 @@
   --purple: #b893ff;
   --radius: 8px;
   --sidebar-w: 300px;
+  --bottombar-h: 52px;
   --display: "Avenir Next Condensed", "DIN Condensed", "Avenir Next", sans-serif;
   --body: "Avenir Next", "Helvetica Neue", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
   --mono: "SFMono-Regular", Menlo, Monaco, Consolas, monospace;
@@ -64,28 +65,101 @@ a:hover {
 }
 
 /* ===== Shell ===== */
+/* Locked to exactly one viewport: the sidebar keeps a stable 100vh box and
+   only the content column scrolls, so a long document (or an empty one) can
+   never stretch or collapse the menu. */
 .shell {
   display: grid;
   grid-template-columns: var(--sidebar-w) minmax(0, 1fr);
-  min-height: 100vh;
+  grid-template-rows: minmax(0, 1fr);
+  height: 100vh;
+  min-height: 0;
+  overflow: hidden;
 }
 
 /* ===== Sidebar ===== */
 .sidebar {
-  position: sticky;
-  top: 0;
-  height: 100vh;
-  overflow-y: auto;
+  position: relative;
+  height: 100%;
+  /* Grid items stretch to the row; cap the height so content can't push it. */
+  max-height: 100vh;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
   border-right: 1px solid var(--line);
   background: var(--surface);
-  padding: 20px 16px 40px;
+}
+/* Pinned header: the brand stays fixed while the nav scrolls under it. */
+.sidebar-head {
+  flex: 0 0 auto;
+  padding: 20px 16px 14px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+}
+.sidebar-scroll {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  min-height: 0;
+  padding: 16px 16px 16px;
+}
+/* Pinned at the bottom of the sidebar; does not scroll with the menu. */
+.sidebar-github {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--line);
+  background: var(--surface-2);
+}
+/* The pinned footer row splits its width evenly between the GitHub link and
+   the language pill, and both carry identical box metrics so they read as a
+   matched pair of buttons. */
+.sidebar-github a,
+.sidebar-github .lang-toggle {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 36px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-3);
+  color: var(--ink);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1;
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+.sidebar-github a:hover,
+.sidebar-github .lang-toggle:hover {
+  border-color: var(--blue);
+  color: var(--ink);
+  text-decoration: none;
+}
+.sidebar-github svg {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+}
+.sidebar-github .ext-arrow {
+  margin-left: 0;
+  color: var(--faint);
 }
 
 .brand {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 4px 8px 16px;
+  padding: 0;
 }
 .brand-mark {
   width: 30px;
@@ -99,6 +173,22 @@ a:hover {
   color: #0c0d0e;
   font-size: 16px;
   flex: 0 0 auto;
+}
+.lang-toggle {
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  color: var(--muted);
+  font-size: 11.5px;
+  font-weight: 600;
+  padding: 4px 9px;
+  border-radius: 999px;
+  cursor: pointer;
+  flex: 0 0 auto;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+.lang-toggle:hover {
+  color: var(--ink);
+  border-color: var(--blue);
 }
 .brand-name {
   font-family: var(--display);
@@ -155,26 +245,13 @@ a:hover {
   color: var(--blue);
 }
 
-.sidebar-foot {
-  margin-top: 28px;
-  padding: 14px 10px;
-  border-top: 1px solid var(--line);
-  font-size: 11.5px;
-  color: var(--faint);
-  line-height: 1.6;
-}
-.sidebar-foot code {
-  font-family: var(--mono);
-  font-size: 11px;
-  color: var(--muted);
-  background: var(--surface-2);
-  padding: 1px 5px;
-  border-radius: 4px;
-}
-
 /* ===== Content ===== */
+/* Owns its own scrollbar inside the fixed-height shell. */
 .content {
-  min-height: 100vh;
+  height: 100%;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 0 0 80px;
 }
 .content-inner {
@@ -272,6 +349,9 @@ a:hover {
 }
 .card-accent.yellow {
   background: var(--yellow);
+}
+.card-accent.red {
+  background: var(--red);
 }
 
 .section-head {
@@ -485,21 +565,29 @@ a:hover {
   color: var(--ink);
 }
 
-/* Doc prev / next */
+/* Doc / artifact prev-next — pinned to the bottom of the viewport (吸底);
+   it does not move with the page scroll. */
 .pager {
+  position: fixed;
+  left: var(--sidebar-w);
+  right: 0;
+  bottom: 0;
+  z-index: 40;
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 14px;
-  margin-top: 44px;
+  margin: 0;
+  padding: 12px 24px calc(12px + env(safe-area-inset-bottom));
   border-top: 1px solid var(--line);
-  padding-top: 20px;
+  background: var(--surface);
+  box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.35);
 }
 .pager a {
   display: block;
   border: 1px solid var(--line);
   border-radius: var(--radius);
   padding: 12px 14px;
-  background: var(--surface);
+  background: var(--surface-2);
   text-decoration: none;
 }
 .pager a:hover {
@@ -524,6 +612,100 @@ a:hover {
 .pager a.empty {
   border: 1px dashed var(--line);
   background: transparent;
+}
+/* Keep the last content line clear of the pinned pager bar (pager pages only). */
+.content-inner:has(.pager) {
+  padding-bottom: 48px;
+}
+
+/* ===== Loading ===== */
+.loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 13px;
+}
+.spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--line);
+  border-top-color: var(--blue);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  flex: 0 0 auto;
+}
+.spinner.lg {
+  width: 26px;
+  height: 26px;
+  border-width: 3px;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Placeholder shown while a document is parsed / mermaid diagrams render. */
+.doc-skeleton {
+  padding: 6px 0 4px;
+}
+.doc-skeleton .sk-line {
+  height: 12px;
+  border-radius: 6px;
+  margin-bottom: 12px;
+  background: linear-gradient(
+    90deg,
+    var(--surface-3) 25%,
+    var(--surface-2) 37%,
+    var(--surface-3) 63%
+  );
+  background-size: 400% 100%;
+  animation: shimmer 1.3s ease-in-out infinite;
+}
+.doc-skeleton .sk-title {
+  height: 24px;
+  width: 46%;
+  margin-bottom: 20px;
+}
+.doc-skeleton .sk-block {
+  height: 148px;
+  margin-bottom: 18px;
+}
+@keyframes shimmer {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: 0 0;
+  }
+}
+
+/* Wrapper for embedded artifacts: an overlay spinner until the iframe fires
+   load, so switching artifacts no longer shows a blank frame. */
+.frame-wrap {
+  position: relative;
+  min-height: 120px;
+}
+.frame-loading {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  z-index: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spinner {
+    animation-duration: 2.4s;
+  }
+  .doc-skeleton .sk-line {
+    animation: none;
+  }
 }
 
 /* ===== Artifact (iframe) ===== */
@@ -572,12 +754,22 @@ a:hover {
   letter-spacing: 0.3px;
   flex: 1;
 }
+/* Wrapper keeps the iframe's flex sizing intact while hosting the spinner. */
+.immersive-frame-wrap {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+}
 .immersive-frame {
   flex: 1;
   width: 100%;
   min-height: 0;
   border: none;
   background: var(--surface);
+}
+.immersive-frame-wrap .frame-loading {
+  border: none;
+  border-radius: 0;
 }
 
 /* ===== Badges / pills ===== */
@@ -597,7 +789,8 @@ a:hover {
 .hero {
   border: 1px solid var(--line);
   background:
-    radial-gradient(circle at 80% -20%, rgba(111, 157, 255, 0.16), transparent 45%), var(--surface);
+    radial-gradient(circle at 80% -20%, rgba(111, 157, 255, 0.16), transparent 45%),
+    var(--surface);
   border-radius: 14px;
   padding: 30px 30px 26px;
   margin-bottom: 36px;
@@ -757,6 +950,64 @@ a:hover {
   display: block;
 }
 
+/* ===== Bottom nav bar (吸底内容切换菜单) =====
+   Shown on mobile only (see the max-width:860px block); on desktop the
+   GitHub entry lives in the pinned sidebar footer instead. */
+.bottombar {
+  position: fixed;
+  left: var(--sidebar-w);
+  right: 0;
+  bottom: 0;
+  z-index: 50;
+  display: none;
+  align-items: stretch;
+  gap: 4px;
+  padding: 8px 12px calc(8px + env(safe-area-inset-bottom));
+  background: var(--surface);
+  border-top: 1px solid var(--line);
+  box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.35);
+}
+.bottombar-item {
+  flex: 1 1 0;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 8px 10px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  font-size: 13px;
+  color: var(--muted);
+  text-decoration: none;
+  white-space: nowrap;
+  transition:
+    background 0.15s,
+    color 0.15s,
+    border-color 0.15s;
+}
+.bottombar-item svg {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+}
+.bottombar-item:hover {
+  background: var(--surface-2);
+  color: var(--ink);
+  text-decoration: none;
+}
+.bottombar-item.active {
+  background: var(--surface-3);
+  color: var(--ink);
+  border-color: var(--line);
+}
+.bottombar-item.external {
+  color: var(--cyan);
+}
+.bottombar-item.external:hover {
+  color: var(--cyan);
+}
+
 /* ===== Responsive ===== */
 @media (max-width: 1080px) {
   .doc-layout {
@@ -769,14 +1020,60 @@ a:hover {
 @media (max-width: 860px) {
   .shell {
     grid-template-columns: 1fr;
+    /* Mobile falls back to normal document flow: the page scrolls as a whole
+       and the sidebar is a stacked block above the content. */
+    grid-template-rows: auto;
+    height: auto;
+    min-height: 100vh;
+    overflow: visible;
+  }
+  .content {
+    height: auto;
+    min-height: 0;
+    overflow: visible;
   }
   .sidebar {
     position: static;
     height: auto;
+    max-height: none;
+    overflow: visible;
+    display: block;
     border-right: none;
     border-bottom: 1px solid var(--line);
   }
+  .sidebar-scroll {
+    overflow: visible;
+    padding: 16px 16px 12px;
+  }
+  /* GitHub is reachable from the mobile 吸底 bar instead; keep the footer
+     row only for the language toggle. */
+  .sidebar-github {
+    justify-content: flex-end;
+  }
+  .sidebar-github a {
+    display: none;
+  }
+  /* GitHub is not rendered here; the lone language pill stays compact and
+     right-aligned instead of stretching across the row. */
+  .sidebar-github .lang-toggle {
+    flex: 0 0 auto;
+  }
+  /* Full-width 吸底 content-switching bar (图1). */
+  .bottombar {
+    display: flex;
+    left: 0;
+    min-height: var(--bottombar-h);
+  }
+  /* Pager stacks just above the GitHub bar on mobile (吸底, scroll-independent). */
+  .pager {
+    left: 0;
+    bottom: calc(var(--bottombar-h) + env(safe-area-inset-bottom));
+  }
+  /* Clear the GitHub bar on every mobile page; add the pager's height on pager pages. */
   .content-inner {
-    padding: 24px 20px 0;
+    padding: 24px 20px calc(var(--bottombar-h) + env(safe-area-inset-bottom));
+  }
+  .content-inner:has(.pager) {
+    padding-bottom: calc(var(--bottombar-h) + 84px + env(safe-area-inset-bottom));
   }
 }
