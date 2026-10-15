@@ -255,10 +255,13 @@ a:hover {
   overscroll-behavior: contain;
   padding: 0 0 80px;
 }
+/* Fluid gutter: 40px on desktop and below, scaling down to 20px as the
+   column narrows toward the mobile breakpoint (860px). */
 .content-inner {
-  max-width: 1200px;
+  max-width: 1720px;
   margin: 0 auto;
-  padding: 32px 40px 0;
+  padding-inline: clamp(20px, 2.4vw, 40px);
+  padding-block: 32px 0;
 }
 
 .crumb {
@@ -710,6 +713,9 @@ a:hover {
   .nav-toggle-bars i {
     transition: none;
   }
+  .shell[data-nav-open="true"] .sidebar {
+    animation: none;
+  }
 }
 
 /* ===== Artifact (iframe) ===== */
@@ -1147,30 +1153,54 @@ a:hover {
     overflow: hidden;
   }
 
-  /* The sidebar becomes the nav dropdown: hidden until the header toggle opens
-     it, then pinned under the header as its own scroll area. */
+  /* The sidebar becomes a compact floating dropdown: hidden until the header
+     toggle opens it, then anchored under the button on the right as its own
+     scroll area — a floating card, not a full-screen panel. */
   .sidebar {
     position: fixed;
-    top: var(--header-h);
-    left: 0;
-    right: 0;
-    bottom: 0;
+    top: calc(var(--header-h) + 8px);
+    right: 16px;
+    width: min(340px, calc(100vw - 32px));
+    max-height: calc(100vh - var(--header-h) - 8px - var(--bottombar-h) - 16px);
     z-index: 55;
     display: none;
-    height: auto;
-    max-height: none;
+    flex-direction: column;
     overflow: hidden;
-    border-right: none;
-    border-bottom: none;
+    border: 1px solid var(--line);
+    border-radius: 12px;
     background: var(--surface);
   }
   .shell[data-nav-open="true"] .sidebar {
     display: flex;
-    box-shadow: 0 18px 40px rgba(0, 0, 0, 0.4);
+    box-shadow: 0 18px 40px rgba(0, 0, 0, 0.5);
+    transform-origin: top right;
+    animation: nav-pop 0.16s ease;
+  }
+  /* Suppress the browser's default (often orange) focus outline on the card;
+     keyboard-driven focus gets a themed ring instead, so a mouse-opened panel
+     doesn't flash a jarring box. */
+  .sidebar:focus {
+    outline: none;
+  }
+  .sidebar:focus-visible {
+    outline: 2px solid var(--blue);
+    outline-offset: 2px;
+  }
+  @keyframes nav-pop {
+    from {
+      opacity: 0;
+      transform: translateY(-6px) scale(0.98);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
   }
   .sidebar-scroll {
+    flex: 1 1 auto;
+    min-height: 0;
     overflow-y: auto;
-    padding: 12px 16px 24px;
+    padding: 12px;
   }
   /* The brand and the footer row now live in the mobile header / bottom bar. */
   .sidebar-head,
