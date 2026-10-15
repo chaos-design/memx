@@ -1,3 +1,4 @@
+import type { RefObject } from "react";
 import { artifactPages } from "./artifacts";
 import { catalogFor } from "./docs";
 import { nextLang, useLang } from "./i18n";
@@ -9,7 +10,7 @@ const githubIcon = (
   </svg>
 );
 
-export function Sidebar({ route }: { route: Route }) {
+export function Sidebar({ ref, route }: { ref?: RefObject<HTMLElement | null>; route: Route }) {
   const { lang, setLang, t } = useLang();
   const catalog = catalogFor(lang);
   const activeKind = route.kind;
@@ -17,7 +18,9 @@ export function Sidebar({ route }: { route: Route }) {
     activeKind === "doc" ? route.slug : activeKind === "artifact" ? route.slug : null;
 
   return (
-    <aside className="sidebar">
+    // `site-nav` is the panel the mobile header toggle expands (aria-controls).
+    // tabIndex -1 only allows programmatic focus when the panel opens.
+    <aside className="sidebar" id="site-nav" ref={ref} tabIndex={-1} aria-label={t.navigate}>
       <div className="sidebar-head">
         <div className="brand">
           <div className="brand-mark">M</div>

@@ -14,6 +14,8 @@ const STRINGS = {
     artifacts: "产物 (Artifacts)",
     langLabel: "English",
     langTitle: "切换到 English",
+    navOpen: "打开导航菜单",
+    navClose: "关闭导航菜单",
     // Home
     homeCrumb: "memx · 在线文档中心",
     heroKicker: "Agent 长期记忆 · 分层存储",
@@ -87,6 +89,8 @@ const STRINGS = {
     artifacts: "Artifacts",
     langLabel: "中文",
     langTitle: "Switch to 中文",
+    navOpen: "Open navigation menu",
+    navClose: "Close navigation menu",
     homeCrumb: "memx · Online Docs",
     heroKicker: "Long-term memory for agents · Layered storage",
     heroTitle: "memx Documentation & Artifact Gallery",

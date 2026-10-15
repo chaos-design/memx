@@ -16,6 +16,7 @@
   --radius: 8px;
   --sidebar-w: 300px;
   --bottombar-h: 52px;
+  --header-h: 56px;
   --display: "Avenir Next Condensed", "DIN Condensed", "Avenir Next", sans-serif;
   --body: "Avenir Next", "Helvetica Neue", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
   --mono: "SFMono-Regular", Menlo, Monaco, Consolas, monospace;
@@ -706,6 +707,9 @@ a:hover {
   .doc-skeleton .sk-line {
     animation: none;
   }
+  .nav-toggle-bars i {
+    transition: none;
+  }
 }
 
 /* ===== Artifact (iframe) ===== */
@@ -950,6 +954,17 @@ a:hover {
   display: block;
 }
 
+/* ===== Mobile header (nav toggle) =====
+   Desktop keeps the pinned sidebar and has no top bar, so the header and its
+   toggle exist only inside the mobile breakpoint (max-width: 860px) — see the
+   responsive block at the bottom of this file. */
+.site-header {
+  display: none;
+}
+.nav-backdrop {
+  display: none;
+}
+
 /* ===== Bottom nav bar (吸底内容切换菜单) =====
    Shown on mobile only (see the max-width:860px block); on desktop the
    GitHub entry lives in the pinned sidebar footer instead. */
@@ -1021,42 +1036,146 @@ a:hover {
   .shell {
     grid-template-columns: 1fr;
     /* Mobile falls back to normal document flow: the page scrolls as a whole
-       and the sidebar is a stacked block above the content. */
+       and the sidebar turns into the header's dropdown panel. */
     grid-template-rows: auto;
     height: auto;
     min-height: 100vh;
     overflow: visible;
+    /* The mobile header is fixed, so the shell reserves its height instead of
+       letting the bar overlap the first row. */
+    padding-top: var(--header-h);
   }
   .content {
     height: auto;
     min-height: 0;
     overflow: visible;
   }
-  .sidebar {
-    position: static;
-    height: auto;
-    max-height: none;
-    overflow: visible;
-    display: block;
-    border-right: none;
+
+  /* ===== Mobile header: brand + language pill + nav toggle ===== */
+  .site-header {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 60;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    height: var(--header-h);
+    padding: 0 16px;
+    background: var(--surface);
     border-bottom: 1px solid var(--line);
   }
-  .sidebar-scroll {
-    overflow: visible;
-    padding: 16px 16px 12px;
+  .site-header-brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+    color: var(--ink);
+    text-decoration: none;
   }
-  /* GitHub is reachable from the mobile 吸底 bar instead; keep the footer
-     row only for the language toggle. */
-  .sidebar-github {
-    justify-content: flex-end;
+  .site-header-brand:hover {
+    text-decoration: none;
   }
-  .sidebar-github a {
+  .site-header-text {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+  .site-header-text .brand-name,
+  .site-header-text .brand-sub {
+    line-height: 1.2;
+  }
+  .site-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-left: auto;
+  }
+  .nav-toggle {
+    display: grid;
+    place-items: center;
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--surface-3);
+    color: var(--ink);
+    cursor: pointer;
+    transition: border-color 0.15s ease;
+  }
+  .nav-toggle:hover,
+  .nav-toggle.open {
+    border-color: var(--blue);
+  }
+  .nav-toggle-bars {
+    display: grid;
+    gap: 4px;
+    width: 16px;
+  }
+  .nav-toggle-bars i {
+    display: block;
+    height: 2px;
+    border-radius: 2px;
+    background: currentColor;
+    transition:
+      transform 0.15s ease,
+      opacity 0.15s ease;
+  }
+  /* Open state morphs the three bars into a close cross. */
+  .nav-toggle.open .nav-toggle-bars i:nth-child(1) {
+    transform: translateY(6px) rotate(45deg);
+  }
+  .nav-toggle.open .nav-toggle-bars i:nth-child(2) {
+    opacity: 0;
+  }
+  .nav-toggle.open .nav-toggle-bars i:nth-child(3) {
+    transform: translateY(-6px) rotate(-45deg);
+  }
+  /* Tap-anywhere-to-close target: covers the page but leaves the header (and
+     therefore the toggle) clickable. */
+  .nav-backdrop {
+    display: block;
+    position: fixed;
+    inset: var(--header-h) 0 0 0;
+    z-index: 54;
+    background: rgba(0, 0, 0, 0.45);
+  }
+  /* Freeze the page behind the dropdown while it is open. */
+  body.nav-open {
+    overflow: hidden;
+  }
+
+  /* The sidebar becomes the nav dropdown: hidden until the header toggle opens
+     it, then pinned under the header as its own scroll area. */
+  .sidebar {
+    position: fixed;
+    top: var(--header-h);
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 55;
     display: none;
+    height: auto;
+    max-height: none;
+    overflow: hidden;
+    border-right: none;
+    border-bottom: none;
+    background: var(--surface);
   }
-  /* GitHub is not rendered here; the lone language pill stays compact and
-     right-aligned instead of stretching across the row. */
-  .sidebar-github .lang-toggle {
-    flex: 0 0 auto;
+  .shell[data-nav-open="true"] .sidebar {
+    display: flex;
+    box-shadow: 0 18px 40px rgba(0, 0, 0, 0.4);
+  }
+  .sidebar-scroll {
+    overflow-y: auto;
+    padding: 12px 16px 24px;
+  }
+  /* The brand and the footer row now live in the mobile header / bottom bar. */
+  .sidebar-head,
+  .sidebar-github {
+    display: none;
   }
   /* Full-width 吸底 content-switching bar (图1). */
   .bottombar {
