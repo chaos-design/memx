@@ -22,13 +22,13 @@ export function Sidebar({ ref, route }: { ref?: RefObject<HTMLElement | null>; r
     // tabIndex -1 only allows programmatic focus when the panel opens.
     <aside className="sidebar" id="site-nav" ref={ref} tabIndex={-1} aria-label={t.navigate}>
       <div className="sidebar-head">
-        <div className="brand">
+        <a className="brand" href={ROUTES.home} aria-label={t.backHome}>
           <div className="brand-mark">M</div>
           <div>
             <div className="brand-name">memx</div>
             <div className="brand-sub">{t.brandSub}</div>
           </div>
-        </div>
+        </a>
       </div>
 
       <div className="sidebar-scroll">
