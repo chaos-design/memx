@@ -263,12 +263,14 @@ a:hover {
   overscroll-behavior: contain;
   padding: 0 0 80px;
 }
-/* Fluid gutter: 40px on desktop and below, scaling down to 20px as the
-   column narrows toward the mobile breakpoint (860px). */
+/* Fluid content column: fills the available content column and, only on very
+   wide screens, caps at a comfortable 2200px so long documents stay readable.
+   The gutter scales with the viewport (3vw, clamped 20–56px) instead of a
+   fixed 40px, so the column truly tracks window width. */
 .content-inner {
-  max-width: 1720px;
+  max-width: 2200px;
   margin: 0 auto;
-  padding-inline: clamp(20px, 2.4vw, 40px);
+  padding-inline: clamp(20px, 3vw, 56px);
   padding-block: 32px 0;
 }
 
