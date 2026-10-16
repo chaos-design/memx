@@ -1112,6 +1112,29 @@ a:hover {
     gap: 8px;
     margin-left: auto;
   }
+  /* GitHub entry moved up into the mobile header (kept in the 吸底 bar too). */
+  .header-github {
+    display: grid;
+    place-items: center;
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--surface-3);
+    color: var(--cyan);
+    text-decoration: none;
+    cursor: pointer;
+    transition: border-color 0.15s ease;
+  }
+  .header-github:hover {
+    border-color: var(--blue);
+    text-decoration: none;
+  }
+  .header-github svg {
+    width: 18px;
+    height: 18px;
+  }
   .nav-toggle {
     display: grid;
     place-items: center;
@@ -1167,28 +1190,27 @@ a:hover {
     overflow: hidden;
   }
 
-  /* The sidebar becomes a compact floating dropdown: hidden until the header
-     toggle opens it, then anchored under the button on the right as its own
-     scroll area — a floating card, not a full-screen panel. */
+  /* The sidebar expands to fill the whole visible area below the header: a
+     full-width panel from the header down to the bottom of the viewport, with
+     its own scroll area. The header (and its toggle) stays pinned above. */
   .sidebar {
     position: fixed;
-    top: calc(var(--header-h) + 8px);
-    right: 16px;
-    width: min(340px, calc(100vw - 32px));
-    max-height: calc(100vh - var(--header-h) - 8px - var(--bottombar-h) - 16px);
+    top: var(--header-h);
+    left: 0;
+    right: 0;
+    bottom: 0;
     z-index: 55;
     display: none;
     flex-direction: column;
     overflow: hidden;
-    border: 1px solid var(--line);
-    border-radius: 12px;
+    border-right: none;
+    border-bottom: none;
     background: var(--surface);
   }
   .shell[data-nav-open="true"] .sidebar {
     display: flex;
-    box-shadow: 0 18px 40px rgba(0, 0, 0, 0.5);
-    transform-origin: top right;
-    animation: nav-pop 0.16s ease;
+    box-shadow: 0 -12px 40px rgba(0, 0, 0, 0.45);
+    animation: nav-slide 0.18s ease;
   }
   /* Suppress the browser's default (often orange) focus outline on the card;
      keyboard-driven focus gets a themed ring instead, so a mouse-opened panel
@@ -1200,14 +1222,14 @@ a:hover {
     outline: 2px solid var(--blue);
     outline-offset: 2px;
   }
-  @keyframes nav-pop {
+  @keyframes nav-slide {
     from {
       opacity: 0;
-      transform: translateY(-6px) scale(0.98);
+      transform: translateY(-12px);
     }
     to {
       opacity: 1;
-      transform: translateY(0) scale(1);
+      transform: translateY(0);
     }
   }
   .sidebar-scroll {
