@@ -391,6 +391,10 @@ a:hover {
   font-size: 15px;
   line-height: 1.75;
   color: var(--ink);
+  /* Grid item default min-width:auto lets a wide table push the whole track
+     (and the content area) wider. min-width:0 keeps the body at the track
+     width so wide children scroll inside themselves instead. */
+  min-width: 0;
 }
 .doc-body h1,
 .doc-body h2,
@@ -982,7 +986,9 @@ a:hover {
 /* ===== Responsive ===== */
 @media (max-width: 1080px) {
   .doc-layout {
-    grid-template-columns: 1fr;
+    /* minmax(0,1fr) — not bare 1fr — so a wide table scrolls inside the
+       column instead of widening it past the viewport. */
+    grid-template-columns: minmax(0, 1fr);
   }
   .doc-toc {
     display: none;
@@ -990,7 +996,9 @@ a:hover {
 }
 @media (max-width: 860px) {
   .shell {
-    grid-template-columns: 1fr;
+    /* minmax(0,1fr): keep the single content column pinned to the viewport
+       so wide tables/code scroll inside themselves, never widen the shell. */
+    grid-template-columns: minmax(0, 1fr);
     /* Like desktop, the viewport is locked and only the content column scrolls.
        The fixed header is reserved via padding-top so it never overlaps content. */
     grid-template-rows: minmax(0, 1fr);
