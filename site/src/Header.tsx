@@ -53,7 +53,7 @@ export function Header({
           title={t.langTitle}
           aria-label={t.langTitle}
         >
-          {t.langLabel}
+          {t.langShort}
         </button>
         <button
           type="button"

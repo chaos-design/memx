@@ -14,6 +14,7 @@ const STRINGS = {
     artifacts: "产物 (Artifacts)",
     langLabel: "English",
     langTitle: "切换到 English",
+    langShort: "EN",
     navOpen: "打开导航菜单",
     navClose: "关闭导航菜单",
     // Home
@@ -89,6 +90,7 @@ const STRINGS = {
     artifacts: "Artifacts",
     langLabel: "中文",
     langTitle: "Switch to 中文",
+    langShort: "中",
     navOpen: "Open navigation menu",
     navClose: "Close navigation menu",
     homeCrumb: "memx · Online Docs",

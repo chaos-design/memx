@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { BottomBar } from "./BottomBar";
 import { ArtifactView } from "./ArtifactView";
 import { DocView } from "./DocView";
 import { Gallery } from "./Gallery";
@@ -101,7 +100,6 @@ function Shell() {
       <main className="content" ref={contentRef}>
         {view}
       </main>
-      <BottomBar />
     </div>
   );
 }
