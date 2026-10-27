@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import type { RefObject } from "react";
 import { artifactPages } from "./artifacts";
 import { catalogFor } from "./docs";
@@ -10,12 +11,37 @@ const githubIcon = (
   </svg>
 );
 
-export function Sidebar({ ref, route }: { ref?: RefObject<HTMLElement | null>; route: Route }) {
+export function Sidebar({
+  ref,
+  route,
+  open,
+}: {
+  ref?: RefObject<HTMLElement | null>;
+  route: Route;
+  /** True while the mobile dropdown is expanded; lets us scroll the active
+   *  entry into view so the current page is always findable in the panel. */
+  open?: boolean;
+}) {
   const { lang, setLang, t } = useLang();
   const catalog = catalogFor(lang);
   const activeKind = route.kind;
   const activeSlug =
     activeKind === "doc" ? route.slug : activeKind === "artifact" ? route.slug : null;
+  const activeItemRef = useRef<HTMLAnchorElement | null>(null);
+
+  // When the mobile panel expands, bring the active entry into the visible part
+  // of the independently-scrolling `.sidebar-scroll`, so the current page's
+  // link is never stranded below the fold. Runs after the panel is painted.
+  useEffect(() => {
+    if (open) activeItemRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }, [open, lang, activeKind, activeSlug]);
+
+  const activeClass = (active: boolean) => `nav-item${active ? " active" : ""}`;
+
+  // Mark whichever entry is currently active so it can be scrolled into view.
+  const markActive = (el: HTMLAnchorElement | null, active: boolean) => {
+    if (active) activeItemRef.current = el;
+  };
 
   return (
     // `site-nav` is the panel the mobile header toggle expands (aria-controls).
@@ -34,10 +60,18 @@ export function Sidebar({ ref, route }: { ref?: RefObject<HTMLElement | null>; r
       <div className="sidebar-scroll">
         <nav className="nav-group">
           <div className="nav-label">{t.navigate}</div>
-          <a href={ROUTES.home} className={`nav-item ${activeKind === "home" ? "active" : ""}`}>
+          <a
+            ref={(el) => markActive(el, activeKind === "home")}
+            href={ROUTES.home}
+            className={activeClass(activeKind === "home")}
+          >
             <span>{t.home}</span>
           </a>
-          <a href={ROUTES.gallery} className={`nav-item ${activeKind === "gallery" ? "active" : ""}`}>
+          <a
+            ref={(el) => markActive(el, activeKind === "gallery")}
+            href={ROUTES.gallery}
+            className={activeClass(activeKind === "gallery")}
+          >
             <span>{t.gallery}</span>
           </a>
         </nav>
@@ -45,34 +79,38 @@ export function Sidebar({ ref, route }: { ref?: RefObject<HTMLElement | null>; r
         {catalog.sections.map((section) => (
           <div className="nav-group" key={section.id}>
             <div className="nav-label">{section.title}</div>
-            {section.items.map((item) => (
-              <a
-                key={item.slug}
-                href={ROUTES.doc(item.slug)}
-                className={`nav-item ${
-                  activeKind === "doc" && activeSlug === item.slug ? "active" : ""
-                }`}
-                title={item.title}
-              >
-                <span>{item.title}</span>
-              </a>
-            ))}
+            {section.items.map((item) => {
+              const active = activeKind === "doc" && activeSlug === item.slug;
+              return (
+                <a
+                  key={item.slug}
+                  ref={(el) => markActive(el, active)}
+                  href={ROUTES.doc(item.slug)}
+                  className={activeClass(active)}
+                  title={item.title}
+                >
+                  <span>{item.title}</span>
+                </a>
+              );
+            })}
           </div>
         ))}
 
         <div className="nav-group">
           <div className="nav-label">{t.artifacts}</div>
-          {artifactPages.map((a) => (
-            <a
-              key={a.slug}
-              href={ROUTES.artifact(a.slug)}
-              className={`nav-item ${
-                activeKind === "artifact" && activeSlug === a.slug ? "active" : ""
-              }`}
-            >
-              <span>{a.title}</span>
-            </a>
-          ))}
+          {artifactPages.map((a) => {
+            const active = activeKind === "artifact" && activeSlug === a.slug;
+            return (
+              <a
+                key={a.slug}
+                ref={(el) => markActive(el, active)}
+                href={ROUTES.artifact(a.slug)}
+                className={activeClass(active)}
+              >
+                <span>{a.title}</span>
+              </a>
+            );
+          })}
         </div>
       </div>
 

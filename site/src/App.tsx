@@ -93,7 +93,7 @@ function Shell() {
   return (
     <div className="shell" data-nav-open={navOpen ? "true" : "false"}>
       <Header open={navOpen} onToggle={() => setNavOpen((v) => !v)} toggleRef={toggleRef} />
-      <Sidebar ref={navRef} route={route} />
+      <Sidebar ref={navRef} route={route} open={navOpen} />
       {navOpen ? (
         <div className="nav-backdrop" onClick={() => closeNav(true)} aria-hidden="true" />
       ) : null}
