@@ -1214,6 +1214,11 @@ a:hover {
     left: 0;
     right: 0;
     bottom: 0;
+    /* The base rule sets `height: 100%` (full viewport). Kept, that would win
+       over `bottom: 0` and push the panel 56px past the fold, stranding the
+       bottom of the menu off-screen. Size by `top` + `bottom` instead so the
+       panel spans exactly "header → viewport bottom". */
+    height: auto;
     z-index: 55;
     display: none;
     flex-direction: column;
