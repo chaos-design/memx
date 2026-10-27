@@ -855,7 +855,7 @@ a:hover {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 32px;
+  padding: clamp(8px, 3vw, 32px);
   background: rgba(6, 7, 8, 0.82);
   backdrop-filter: blur(4px);
 }
@@ -873,7 +873,7 @@ a:hover {
   flex: 0 0 auto;
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: 10px;
   padding: 12px 16px;
   background: var(--surface-2);
   border-bottom: 1px solid var(--line);
@@ -886,15 +886,19 @@ a:hover {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 40vw;
+  /* Shrink to make room for the tools instead of pushing them off-screen. */
+  flex: 1 1 auto;
+  min-width: 0;
 }
 .lightbox-hint {
+  flex: 0 0 auto;
   font-family: var(--mono);
   font-size: 11px;
   color: var(--faint);
   white-space: nowrap;
 }
 .lightbox-tools {
+  flex: 0 0 auto;
   margin-left: auto;
   display: flex;
   gap: 6px;
@@ -925,7 +929,10 @@ a:hover {
 .lightbox-viewport {
   flex: 1;
   min-height: 0;
-  overflow: auto;
+  /* Pan/zoom is driven by transform + pointer drag, so the viewport itself
+     never scrolls — this keeps zoomed content from spawning scrollbars. */
+  overflow: hidden;
+  padding: 12px;
   cursor: grab;
   touch-action: none;
   display: flex;
@@ -936,18 +943,43 @@ a:hover {
   cursor: grabbing;
 }
 .lightbox-stage {
-  width: max-content;
-  max-width: 1600px;
-  min-width: 0;
   margin: auto;
-  padding: 40px;
   transform-origin: center center;
-  background: var(--surface);
 }
 .lightbox-stage svg {
-  width: 100%;
-  height: auto;
   display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* Narrow screens: drop the long hint and enlarge the tool hit-targets so the
+   whole toolbar stays on-screen and is comfortable to tap. */
+@media (max-width: 860px) {
+  .lightbox {
+    padding: 8px;
+  }
+  .lightbox-head {
+    gap: 8px;
+    padding: 8px 10px;
+  }
+  .lightbox-title {
+    font-size: 14px;
+  }
+  .lightbox-hint {
+    display: none;
+  }
+  .lightbox-tool {
+    min-width: 38px;
+    height: 38px;
+    padding: 0 8px;
+    font-size: 14px;
+  }
+  .lightbox-close {
+    font-size: 14px;
+  }
+  .lightbox-viewport {
+    padding: 8px;
+  }
 }
 
 /* ===== Bottom nav bar (吸底内容切换菜单) =====
