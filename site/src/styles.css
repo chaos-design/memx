@@ -15,7 +15,7 @@
   --purple: #b893ff;
   --radius: 8px;
   --sidebar-w: 300px;
-  --bottombar-h: 52px;
+  --header-h: 56px;
   --display: "Avenir Next Condensed", "DIN Condensed", "Avenir Next", sans-serif;
   --body: "Avenir Next", "Helvetica Neue", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
   --mono: "SFMono-Regular", Menlo, Monaco, Consolas, monospace;
@@ -160,6 +160,14 @@ a:hover {
   align-items: center;
   gap: 10px;
   padding: 0;
+  /* The wordmark is a link back to the home route; neutralize the global
+     anchor color/underline so it reads as a logo, not a blue hyperlink. */
+  color: var(--ink);
+  text-decoration: none;
+  cursor: pointer;
+}
+.brand:hover {
+  text-decoration: none;
 }
 .brand-mark {
   width: 30px;
@@ -254,10 +262,14 @@ a:hover {
   overscroll-behavior: contain;
   padding: 0 0 80px;
 }
+/* Content area spans the full width of the available content column — no
+   centering cap — so it tracks the viewport. Gutter scales with the viewport
+   (3vw, clamped 20–56px). Wide content (tables, code blocks, diagrams) keeps
+   its own `overflow-x: auto` so it scrolls within itself instead of forcing
+   the whole column to scroll or squish. */
 .content-inner {
-  max-width: 1200px;
-  margin: 0 auto;
-  padding: 32px 40px 0;
+  padding-inline: clamp(20px, 3vw, 56px);
+  padding-block: 32px 0;
 }
 
 .crumb {
@@ -379,6 +391,10 @@ a:hover {
   font-size: 15px;
   line-height: 1.75;
   color: var(--ink);
+  /* Grid item default min-width:auto lets a wide table push the whole track
+     (and the content area) wider. min-width:0 keeps the body at the track
+     width so wide children scroll inside themselves instead. */
+  min-width: 0;
 }
 .doc-body h1,
 .doc-body h2,
@@ -706,6 +722,12 @@ a:hover {
   .doc-skeleton .sk-line {
     animation: none;
   }
+  .nav-toggle-bars i {
+    transition: none;
+  }
+  .shell[data-nav-open="true"] .sidebar {
+    animation: none;
+  }
 }
 
 /* ===== Artifact (iframe) ===== */
@@ -855,12 +877,16 @@ a:hover {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 32px;
-  background: rgba(6, 7, 8, 0.82);
+  /* Symmetric 48px margin: the fitted diagram fills most of the screen
+     (the header still leaves the controls reachable), which looks more
+     proportional than the previous full-bleed 24px overlay. */
+  padding: 48px;
+  background: rgba(6, 7, 8, 0.88);
   backdrop-filter: blur(4px);
 }
 .lightbox-box {
   width: 100%;
+  max-width: 1560px;
   height: 100%;
   display: flex;
   flex-direction: column;
@@ -868,40 +894,48 @@ a:hover {
   border: 1px solid var(--line);
   border-radius: 12px;
   overflow: hidden;
+  /* Programmatic focus target for the dialog; the ring is suppressed because
+     focus lands here on open, not from keyboard traversal. */
+  outline: none;
 }
 .lightbox-head {
   flex: 0 0 auto;
   display: flex;
   align-items: center;
-  gap: 14px;
-  padding: 12px 16px;
+  gap: 12px;
+  padding: 10px 14px;
   background: var(--surface-2);
   border-bottom: 1px solid var(--line);
 }
 .lightbox-title {
   font-family: var(--display);
   font-weight: 700;
-  font-size: 15px;
+  font-size: 14px;
   letter-spacing: 0.3px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 40vw;
+  /* Shrinkable: the tools never get pushed out of the header. */
+  min-width: 0;
+  max-width: 48%;
 }
 .lightbox-hint {
   font-family: var(--mono);
   font-size: 11px;
   color: var(--faint);
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .lightbox-tools {
   margin-left: auto;
   display: flex;
   gap: 6px;
+  flex: 0 0 auto;
 }
 .lightbox-tool {
-  min-width: 30px;
-  height: 30px;
+  min-width: 32px;
+  height: 32px;
   padding: 0 10px;
   font-family: var(--mono);
   font-size: 13px;
@@ -918,16 +952,52 @@ a:hover {
   border-color: var(--blue);
   color: var(--ink);
 }
+.lightbox-tool:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 2px;
+}
+/* Icon-only tool buttons (− / + / ✕): square 32px on desktop, growing to the
+   40px mobile tap target below. flex-centred so the glyph sits dead-centre in
+   the square rather than riding on the default 10px horizontal padding.
+   font-size is bumped above the base 13px so the glyph reads clearly inside
+   the square; .lightbox-close rides along to stay visually consistent. */
+.lightbox-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  min-width: 0;
+  padding: 0;
+  font-size: 16px;
+}
+/* Fit / zoom-readout button: same hit area as the others, wider label. */
+.lightbox-fit {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 9px;
+}
+.lightbox-fit-icon {
+  font-size: 15px;
+  opacity: 0.7;
+}
+.lightbox-percent {
+  font-variant-numeric: tabular-nums;
+  min-width: 3.6ch;
+  text-align: center;
+}
 .lightbox-close {
   color: var(--ink);
-  font-size: 12px;
 }
+/* Panning/scaling is driven by transform, so the viewport itself never
+   scrolls — that keeps the fitted diagram centred and avoids double scroll. */
 .lightbox-viewport {
   flex: 1;
   min-height: 0;
-  overflow: auto;
+  overflow: hidden;
   cursor: grab;
   touch-action: none;
+  overscroll-behavior: contain;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -935,83 +1005,38 @@ a:hover {
 .lightbox-viewport:active {
   cursor: grabbing;
 }
+/* The stage is sized to the diagram's intrinsic viewBox (inline style from
+   Lightbox.tsx) and scaled by transform, so zoom is predictable and the
+   fitted diagram can fill the whole viewport. */
 .lightbox-stage {
-  width: max-content;
-  max-width: 1600px;
-  min-width: 0;
-  margin: auto;
-  padding: 40px;
+  flex: 0 0 auto;
   transform-origin: center center;
+  will-change: transform;
   background: var(--surface);
 }
 .lightbox-stage svg {
-  width: 100%;
-  height: auto;
   display: block;
+  width: 100%;
+  height: 100%;
 }
 
-/* ===== Bottom nav bar (吸底内容切换菜单) =====
-   Shown on mobile only (see the max-width:860px block); on desktop the
-   GitHub entry lives in the pinned sidebar footer instead. */
-.bottombar {
-  position: fixed;
-  left: var(--sidebar-w);
-  right: 0;
-  bottom: 0;
-  z-index: 50;
+/* ===== Mobile header (nav toggle) =====
+   Desktop keeps the pinned sidebar and has no top bar, so the header and its
+   toggle exist only inside the mobile breakpoint (max-width: 860px) — see the
+   responsive block at the bottom of this file. */
+.site-header {
   display: none;
-  align-items: stretch;
-  gap: 4px;
-  padding: 8px 12px calc(8px + env(safe-area-inset-bottom));
-  background: var(--surface);
-  border-top: 1px solid var(--line);
-  box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.35);
 }
-.bottombar-item {
-  flex: 1 1 0;
-  min-width: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 7px;
-  padding: 8px 10px;
-  border: 1px solid transparent;
-  border-radius: 8px;
-  font-size: 13px;
-  color: var(--muted);
-  text-decoration: none;
-  white-space: nowrap;
-  transition:
-    background 0.15s,
-    color 0.15s,
-    border-color 0.15s;
-}
-.bottombar-item svg {
-  width: 16px;
-  height: 16px;
-  flex: 0 0 auto;
-}
-.bottombar-item:hover {
-  background: var(--surface-2);
-  color: var(--ink);
-  text-decoration: none;
-}
-.bottombar-item.active {
-  background: var(--surface-3);
-  color: var(--ink);
-  border-color: var(--line);
-}
-.bottombar-item.external {
-  color: var(--cyan);
-}
-.bottombar-item.external:hover {
-  color: var(--cyan);
+.nav-backdrop {
+  display: none;
 }
 
 /* ===== Responsive ===== */
 @media (max-width: 1080px) {
   .doc-layout {
-    grid-template-columns: 1fr;
+    /* minmax(0,1fr) — not bare 1fr — so a wide table scrolls inside the
+       column instead of widening it past the viewport. */
+    grid-template-columns: minmax(0, 1fr);
   }
   .doc-toc {
     display: none;
@@ -1019,61 +1044,300 @@ a:hover {
 }
 @media (max-width: 860px) {
   .shell {
-    grid-template-columns: 1fr;
-    /* Mobile falls back to normal document flow: the page scrolls as a whole
-       and the sidebar is a stacked block above the content. */
-    grid-template-rows: auto;
-    height: auto;
-    min-height: 100vh;
-    overflow: visible;
+    /* minmax(0,1fr): keep the single content column pinned to the viewport
+       so wide tables/code scroll inside themselves, never widen the shell. */
+    grid-template-columns: minmax(0, 1fr);
+    /* Like desktop, the viewport is locked and only the content column scrolls.
+       The fixed header is reserved via padding-top so it never overlaps content. */
+    grid-template-rows: minmax(0, 1fr);
+    height: 100vh;
+    min-height: 0;
+    overflow: hidden;
+    padding-top: var(--header-h);
   }
   .content {
-    height: auto;
+    height: 100%;
     min-height: 0;
-    overflow: visible;
+    overflow-y: auto;
+    overscroll-behavior: contain;
   }
-  .sidebar {
-    position: static;
-    height: auto;
-    max-height: none;
-    overflow: visible;
-    display: block;
-    border-right: none;
+  /* While the nav dropdown is open, freeze the content scroll so only the panel
+     (and its own scroll area) is interactive behind the backdrop. */
+  .shell[data-nav-open="true"] .content {
+    overflow: hidden;
+  }
+
+  /* ===== Mobile header: brand + language pill + nav toggle ===== */
+  .site-header {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 60;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    height: var(--header-h);
+    padding: 0 16px;
+    background: var(--surface);
     border-bottom: 1px solid var(--line);
   }
+  .site-header-brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+    color: var(--ink);
+    text-decoration: none;
+  }
+  .site-header-brand:hover {
+    text-decoration: none;
+  }
+  .site-header-text {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+  .site-header-text .brand-name,
+  .site-header-text .brand-sub {
+    line-height: 1.2;
+  }
+  .site-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-left: auto;
+  }
+  /* The language pill is square and matches the GitHub icon / toggle so the
+     whole actions row reads as a consistent set of equal controls. */
+  .site-header .lang-toggle {
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--surface-3);
+    color: var(--ink);
+    font-size: 13px;
+    font-weight: 700;
+    display: grid;
+    place-items: center;
+  }
+  .site-header .lang-toggle:hover {
+    color: var(--ink);
+    border-color: var(--blue);
+  }
+  /* GitHub entry moved up into the mobile header (kept in the 吸底 bar too). */
+  .header-github {
+    display: grid;
+    place-items: center;
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--surface-3);
+    color: var(--cyan);
+    text-decoration: none;
+    cursor: pointer;
+    transition: border-color 0.15s ease;
+  }
+  .header-github:hover {
+    border-color: var(--blue);
+    text-decoration: none;
+  }
+  .header-github svg {
+    width: 18px;
+    height: 18px;
+  }
+  .nav-toggle {
+    display: grid;
+    place-items: center;
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--surface-3);
+    color: var(--ink);
+    cursor: pointer;
+    transition: border-color 0.15s ease;
+  }
+  .nav-toggle:hover,
+  .nav-toggle.open {
+    border-color: var(--blue);
+  }
+  .nav-toggle-bars {
+    display: grid;
+    gap: 4px;
+    width: 16px;
+  }
+  .nav-toggle-bars i {
+    display: block;
+    height: 2px;
+    border-radius: 2px;
+    background: currentColor;
+    transition:
+      transform 0.15s ease,
+      opacity 0.15s ease;
+  }
+  /* Open state morphs the three bars into a close cross. */
+  .nav-toggle.open .nav-toggle-bars i:nth-child(1) {
+    transform: translateY(6px) rotate(45deg);
+  }
+  .nav-toggle.open .nav-toggle-bars i:nth-child(2) {
+    opacity: 0;
+  }
+  .nav-toggle.open .nav-toggle-bars i:nth-child(3) {
+    transform: translateY(-6px) rotate(-45deg);
+  }
+  /* Tap-anywhere-to-close target: covers the page but leaves the header (and
+     therefore the toggle) clickable. */
+  .nav-backdrop {
+    display: block;
+    position: fixed;
+    inset: var(--header-h) 0 0 0;
+    z-index: 54;
+    background: rgba(0, 0, 0, 0.45);
+  }
+  /* Freeze the page behind the dropdown while it is open. */
+  body.nav-open {
+    overflow: hidden;
+  }
+
+  /* The sidebar expands to fill the whole visible area below the header: a
+     full-width panel from the header down to the bottom of the viewport, with
+     its own scroll area. The header (and its toggle) stays pinned above. */
+  .sidebar {
+    position: fixed;
+    top: var(--header-h);
+    left: 0;
+    right: 0;
+    bottom: 0;
+    /* The base rule sets `height: 100%` (full viewport). Kept, that would win
+       over `bottom: 0` and push the panel 56px past the fold, stranding the
+       bottom of the menu off-screen. Size by `top` + `bottom` instead so the
+       panel spans exactly "header → viewport bottom". */
+    height: auto;
+    z-index: 55;
+    display: none;
+    flex-direction: column;
+    overflow: hidden;
+    border-right: none;
+    border-bottom: none;
+    background: var(--surface);
+  }
+  .shell[data-nav-open="true"] .sidebar {
+    display: flex;
+    box-shadow: 0 -12px 40px rgba(0, 0, 0, 0.45);
+    animation: nav-slide 0.18s ease;
+  }
+  /* Suppress the browser's default (often orange) focus outline on the card;
+     keyboard-driven focus gets a themed ring instead, so a mouse-opened panel
+     doesn't flash a jarring box. */
+  .sidebar:focus {
+    outline: none;
+  }
+  .sidebar:focus-visible {
+    outline: 2px solid var(--blue);
+    outline-offset: 2px;
+  }
+  @keyframes nav-slide {
+    from {
+      opacity: 0;
+      transform: translateY(-12px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
   .sidebar-scroll {
-    overflow: visible;
-    padding: 16px 16px 12px;
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 12px;
   }
-  /* GitHub is reachable from the mobile 吸底 bar instead; keep the footer
-     row only for the language toggle. */
+  /* The brand and the footer row now live in the mobile header / bottom bar. */
+  .sidebar-head,
   .sidebar-github {
-    justify-content: flex-end;
-  }
-  .sidebar-github a {
     display: none;
   }
-  /* GitHub is not rendered here; the lone language pill stays compact and
-     right-aligned instead of stretching across the row. */
-  .sidebar-github .lang-toggle {
-    flex: 0 0 auto;
-  }
-  /* Full-width 吸底 content-switching bar (图1). */
-  .bottombar {
-    display: flex;
-    left: 0;
-    min-height: var(--bottombar-h);
-  }
-  /* Pager stacks just above the GitHub bar on mobile (吸底, scroll-independent). */
+  /* Pager is the only 吸底 element; it sits directly above the safe area. */
   .pager {
     left: 0;
-    bottom: calc(var(--bottombar-h) + env(safe-area-inset-bottom));
+    bottom: env(safe-area-inset-bottom);
   }
-  /* Clear the GitHub bar on every mobile page; add the pager's height on pager pages. */
+  /* Clear only the safe-area / pager space on mobile pages. */
   .content-inner {
-    padding: 24px 20px calc(var(--bottombar-h) + env(safe-area-inset-bottom));
+    padding: 24px 20px env(safe-area-inset-bottom);
   }
   .content-inner:has(.pager) {
-    padding-bottom: calc(var(--bottombar-h) + 84px + env(safe-area-inset-bottom));
+    padding-bottom: calc(84px + env(safe-area-inset-bottom));
+  }
+
+  /* ===== Diagram lightbox: full-bleed, toolbox always reachable =====
+     On a phone the desktop chrome wasted 64px of width on the overlay padding
+     and overflowed the header (title + hint + 4 buttons ≈ 500px into a 324px
+     box), pushing the zoom/close controls — the whole function area — outside
+     the clipped box. Full-bleed + shrinkable title + hidden hint keeps every
+     control on screen, and the toolbar buttons grow to 40px so they are
+     comfortable tap targets. */
+  .lightbox {
+    padding: 0;
+    background: rgba(6, 7, 8, 0.97);
+    backdrop-filter: none;
+  }
+  .lightbox-box {
+    border: none;
+    border-radius: 0;
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  .lightbox-head {
+    gap: 8px;
+    padding: 8px 12px;
+  }
+  .lightbox-title {
+    flex: 1 1 auto;
+    max-width: none;
+    font-size: 13px;
+  }
+  /* Long gesture hints do not fit a phone header; the gestures stay available
+     and the controls are self-explanatory with their icons/labels. */
+  .lightbox-hint {
+    display: none;
+  }
+  .lightbox-tools {
+    gap: 8px;
+  }
+  .lightbox-tool {
+    min-width: 40px;
+    height: 40px;
+    padding: 0 11px;
+    font-size: 15px;
+  }
+  .lightbox-icon {
+    width: 40px;
+    font-size: 18px;
+  }
+  .lightbox-fit {
+    padding: 0 12px;
+  }
+  .lightbox-percent {
+    min-width: 3.2ch;
+  }
+  .lightbox-close {
+    min-width: 40px;
+  }
+
+  /* The "click to enlarge" affordance is a :hover badge, which never fires on
+     touch — keep a compact glyph visible so the diagram reads as tappable. */
+  .mermaid-diagram::after {
+    content: "⛶";
+    top: 6px;
+    right: 6px;
+    padding: 1px 6px;
+    opacity: 0.5;
   }
 }

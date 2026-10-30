@@ -14,6 +14,9 @@ const STRINGS = {
     artifacts: "产物 (Artifacts)",
     langLabel: "English",
     langTitle: "切换到 English",
+    langShort: "EN",
+    navOpen: "打开导航菜单",
+    navClose: "关闭导航菜单",
     // Home
     homeCrumb: "memx · 在线文档中心",
     heroKicker: "Agent 长期记忆 · 分层存储",
@@ -78,6 +81,14 @@ const STRINGS = {
     pagerNextArtifact: "下一个产物 →",
     pagerDocs: "文档中心 →",
     pagerDocsTitle: "memx 文档",
+    // Lightbox (click-to-zoom diagram)
+    diagramZoom: "图表放大",
+    diagram: "图表",
+    zoomIn: "放大",
+    zoomOut: "缩小",
+    zoomFit: "适应屏幕",
+    zoomClose: "关闭",
+    zoomHint: "滚轮 / 双指缩放 · 拖拽平移 · Esc 关闭",
   },
   en: {
     brandSub: "Docs & Artifacts",
@@ -87,6 +98,9 @@ const STRINGS = {
     artifacts: "Artifacts",
     langLabel: "中文",
     langTitle: "Switch to 中文",
+    langShort: "中",
+    navOpen: "Open navigation menu",
+    navClose: "Close navigation menu",
     homeCrumb: "memx · Online Docs",
     heroKicker: "Long-term memory for agents · Layered storage",
     heroTitle: "memx Documentation & Artifact Gallery",
@@ -148,6 +162,14 @@ const STRINGS = {
     pagerNextArtifact: "Next artifact →",
     pagerDocs: "Documentation →",
     pagerDocsTitle: "memx Docs",
+    // Lightbox (click-to-zoom diagram)
+    diagramZoom: "Diagram zoom",
+    diagram: "Diagram",
+    zoomIn: "Zoom in",
+    zoomOut: "Zoom out",
+    zoomFit: "Fit to screen",
+    zoomClose: "Close",
+    zoomHint: "Scroll / pinch to zoom · drag to pan · Esc to close",
   },
 } as const;
 
